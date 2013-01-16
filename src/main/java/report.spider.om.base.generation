@@ -1,0 +1,101 @@
+
+targetdatabase = mysql
+
+correctGetters = 
+
+             
+
+
+
+
+
+
+
+
+
+    BasePeers generated in package cn.jc.spider.po
+    BaseObjects generated in package cn.jc.spider.po
+    BaseManagers generated in package cn.jc.spider.po
+    BaseBeans generated in package cn.jc.spider.po.bean
+    Maps generated in package cn.jc.spider.po.map
+
+    Failed to create dir or dir already exists: D:\workspace_new\spider\src\main\java/cn\jc\spider\po\
+
+    Failed to create dir or dir already exists: D:\workspace_new\spider\src\main\java/cn\jc\spider\po\
+
+    Failed to create dir or dir already exists: D:\workspace_new\spider\src\main\java/cn\jc\spider\po\map\
+
+
+
+    
+
+        objectattr
+
+        
+
+        
+
+          
+
+
+          
+
+
+        objectitem
+
+        
+
+        
+
+          
+
+
+          
+
+
+        site
+
+        
+
+        
+
+          
+
+
+          
+
+
+        unvisitedurl
+
+        
+
+        
+
+          
+
+
+          
+
+
+        visitedurl
+
+        
+
+        
+
+          
+
+
+          
+
+
+
+
+
+
+    
+
+;
+    Failed to create dir or dir already exists: D:\workspace_new\spider\src\main\java/org\apache\torque\linkage\
+    
+

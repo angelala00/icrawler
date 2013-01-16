@@ -1,0 +1,864 @@
+<html>
+<head>
+  <title>spider_jc</title>
+  <link rel="stylesheet" type="text/css" href="dataModel.css">
+</head>
+
+<body class="normalFont">
+  <table class="summarytable">
+    <tr class=summaryhead">
+      <th class="summaryheadbackground summaryborder summaryheadtablename">Table Name</th>
+      <th class="summaryheadbackground summaryborder summaryheadjavaname">OM Class</th>
+      <th class="summaryheadbackground summaryborder summaryheaddescription">Description</th>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#city_dianping" class="link summarytablenamelink">city_dianping</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">CityDianping</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#parser" class="link summarytablenamelink">parser</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">Parser</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#parser_copy" class="link summarytablenamelink">parser_copy</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">ParserCopy</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#shangquan_dianping" class="link summarytablenamelink">shangquan_dianping</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">ShangquanDianping</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#site" class="link summarytablenamelink">site</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">Site</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#storer" class="link summarytablenamelink">storer</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">Storer</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#task" class="link summarytablenamelink">task</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">Task</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#unvisitedurl" class="link summarytablenamelink">unvisitedurl</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">Unvisitedurl</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#visitedurl" class="link summarytablenamelink">visitedurl</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">Visitedurl</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+    <tr class=summaryrow">
+      <td class="summarybackground summaryborder summarytablename"><a href="#xiaohua" class="link summarytablenamelink">xiaohua</a></td>
+      <td class="summarybackground summaryborder summaryjavaname">Xiaohua</td>
+      <td class="summarybackground summaryborder summarydescription"> &nbsp;</td>
+    </tr>
+  </table>
+
+    <a name="city_dianping"/>
+<h2>city_dianping</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="city_dianpingid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="city_dianpingname">name</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (20) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Name</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="city_dianpingurl">url</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (100) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Url</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="city_dianpingurl1">url1</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (100) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Url1</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+</table>
+
+    <a name="parser"/>
+<h2>parser</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="parserid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parserid_task">id_task</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">IdTask</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parserattr">attr</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Attr</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parserpattern">pattern</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (100) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Pattern</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parsermethodtype">methodtype</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Methodtype</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parserattr_name">attr_name</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">AttrName</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parsernodatype">nodatype</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (100) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Nodatype</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> 节点类型是否为list</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parserpid">pid</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Pid</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> list节点的子节点，这里是list节点（父节点）的ID</td>
+  </tr>
+</table>
+
+    <a name="parser_copy"/>
+<h2>parser_copy</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="parser_copyid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parser_copyid_task">id_task</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">IdTask</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parser_copyattr">attr</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Attr</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parser_copypattern">pattern</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (100) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Pattern</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parser_copymethodtype">methodtype</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Methodtype</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="parser_copyattr_name">attr_name</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">AttrName</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+</table>
+
+    <a name="shangquan_dianping"/>
+<h2>shangquan_dianping</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="shangquan_dianpingid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="shangquan_dianpingcity">city</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">City</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname notnull" id="shangquan_dianpingdistrist">distrist</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Distrist</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname notnull" id="shangquan_dianpingshangquan">shangquan</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Shangquan</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+</table>
+
+    <a name="site"/>
+<h2>site</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="siteid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname notnull" id="sitewebsite">website</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (25) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Website</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="sitewebsitesuperurl">websitesuperurl</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (200) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Websitesuperurl</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="sitemiddlepageurlreg">middlepageurlreg</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (100) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Middlepageurlreg</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="sitetargetpageurlreg">targetpageurlreg</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (100) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Targetpageurlreg</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="sitefrequency">frequency</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (10) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Frequency</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname notnull" id="sitecreatetime">createtime</td>
+    <td class="detailbackground detailborder detailtype">TIMESTAMP</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Createtime</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname notnull" id="siteupdatetime">updatetime</td>
+    <td class="detailbackground detailborder detailtype">TIMESTAMP</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Updatetime</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="siteoperator">operator</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (10) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Operator</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+</table>
+
+    <a name="storer"/>
+<h2>storer</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="storerid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="storerid_task">id_task</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">IdTask</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="storerfieldname">fieldname</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Fieldname</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+</table>
+
+    <a name="task"/>
+<h2>task</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="taskid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="taskname">name</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (30) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Name</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="taskid_prior">id_prior</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">IdPrior</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="taskid_next">id_next</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">IdNext</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="tasktimetime">timetime</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> 0</td>
+    <td class="detailbackground detailborder detailjavaname">Timetime</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+</table>
+
+    <a name="unvisitedurl"/>
+<h2>unvisitedurl</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="unvisitedurlid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="unvisitedurlid_task">id_task</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">IdTask</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="unvisitedurlwebsite">website</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (25) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Website</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname notnull" id="unvisitedurlurl">url</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (200) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Url</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="unvisitedurltimetime">timetime</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> 0</td>
+    <td class="detailbackground detailborder detailjavaname">Timetime</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="unvisitedurlfuzhubiaoshiid">fuzhubiaoshiid</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (300) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Fuzhubiaoshiid</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+</table>
+
+    <a name="visitedurl"/>
+<h2>visitedurl</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="visitedurlid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="visitedurlwebsite">website</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (25) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Website</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname notnull" id="visitedurlurl">url</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (200) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Url</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+</table>
+
+    <a name="xiaohua"/>
+<h2>xiaohua</h2>
+
+<p/>
+<table class="detailtable">
+  <tr class="detailhead">
+    <th class="detailheadbackground detailborder detailheadname">Name</th>
+    <th class="detailheadbackground detailborder detailheadtype">Type</th>
+    <th class="detailheadbackground detailborder detailheadsize">Size</th>
+    <th class="detailheadbackground detailborder detailheaddefault">Default</th>
+    <th class="detailheadbackground detailborder detailheadjavaname">JavaName</th>
+    <th class="detailheadbackground detailborder detailheadpk">PK</th>
+    <th class="detailheadbackground detailborder detailheadfk">FK</th>
+    <th class="detailheadbackground detailborder detailheadnotnull">not null</th>
+    <th class="detailheadbackground detailborder detailheaddescription">Description</th>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname primarykey notnull" id="xiaohuaid">id</td>
+    <td class="detailbackground detailborder detailtype">INTEGER</td>
+    <td class="detailbackground detailborder detailsize"> &nbsp;</td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Id</td>
+    <td class="detailbackground detailborder detailpk"><center> X </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center> X </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="xiaohuatitle">title</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (100) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Title</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="xiaohuacontent">content</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (500) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Content</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="xiaohuaupcount">upcount</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (10) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Upcount</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="xiaohuadowncount">downcount</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (10) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Downcount</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="xiaohuacomentcount">comentcount</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (10) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Comentcount</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="xiaohuatags">tags</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (10) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Tags</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+  <tr class="detailrow">
+    <td class="detailbackground detailborder detailname" id="xiaohuaurl">url</td>
+    <td class="detailbackground detailborder detailtype">VARCHAR</td>
+    <td class="detailbackground detailborder detailsize"> (100) </td>
+    <td class="detailbackground detailborder detaildefault"> &nbsp;</td>
+    <td class="detailbackground detailborder detailjavaname">Url</td>
+    <td class="detailbackground detailborder detailpk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailfk"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detailnotnull"><center>  &nbsp; </center></td>
+    <td class="detailbackground detailborder detaildescription"> &nbsp;</td>
+  </tr>
+</table>
+
+
+</body>
+</html>

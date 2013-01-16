@@ -1,0 +1,161 @@
+
+targetdatabase = mysql
+
+correctGetters = 
+
+             
+
+
+
+
+
+
+
+
+
+    BasePeers generated in package cn.jc.spider.po
+    BaseObjects generated in package cn.jc.spider.po
+    BaseManagers generated in package cn.jc.spider.po
+    BaseBeans generated in package cn.jc.spider.po.bean
+    Maps generated in package cn.jc.spider.po.map
+
+    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
+
+    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
+
+    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\map\
+
+
+
+    
+
+        city_dianping
+
+        
+
+        
+
+          
+
+
+          
+
+
+        parser
+
+        
+
+        
+
+          
+
+
+          
+
+
+        parser_copy
+
+        
+
+        
+
+          
+
+
+          
+
+
+        shangquan_dianping
+
+        
+
+        
+
+          
+
+
+          
+
+
+        site
+
+        
+
+        
+
+          
+
+
+          
+
+
+        storer
+
+        
+
+        
+
+          
+
+
+          
+
+
+        task
+
+        
+
+        
+
+          
+
+
+          
+
+
+        unvisitedurl
+
+        
+
+        
+
+          
+
+
+          
+
+
+        visitedurl
+
+        
+
+        
+
+          
+
+
+          
+
+
+        xiaohua
+
+        
+
+        
+
+          
+
+
+          
+
+
+
+
+
+
+    
+
+;
+    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/org\apache\torque\linkage\
+    
+
