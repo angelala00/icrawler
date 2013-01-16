@@ -142,6 +142,7 @@ public class TaskMapBuilder implements MapBuilder
         cMap.setJavaName( "Timetime" );
         cMap.setAutoIncrement(false);
         cMap.setProtected(false);
+        cMap.setDescription("记录次数");
         cMap.setDefault("0");
         cMap.setInheritance("false");
         cMap.setPosition(5);

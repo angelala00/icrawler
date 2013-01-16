@@ -102,6 +102,7 @@ public class UnvisitedurlMapBuilder implements MapBuilder
         cMap.setJavaName( "IdTask" );
         cMap.setAutoIncrement(false);
         cMap.setProtected(false);
+        cMap.setDescription("该URL属于哪个任务的");
         cMap.setInheritance("false");
         cMap.setPosition(2);
         tMap.addColumn(cMap);
@@ -117,6 +118,7 @@ public class UnvisitedurlMapBuilder implements MapBuilder
         cMap.setProtected(false);
         cMap.setInheritance("false");
         cMap.setSize( 25 );
+        cMap.setForeignKey("site", "website");
         cMap.setPosition(3);
         tMap.addColumn(cMap);
   // ------------- Column: url --------------------
@@ -143,6 +145,7 @@ public class UnvisitedurlMapBuilder implements MapBuilder
         cMap.setJavaName( "Timetime" );
         cMap.setAutoIncrement(false);
         cMap.setProtected(false);
+        cMap.setDescription("次数");
         cMap.setDefault("0");
         cMap.setInheritance("false");
         cMap.setPosition(5);
@@ -157,6 +160,7 @@ public class UnvisitedurlMapBuilder implements MapBuilder
         cMap.setJavaName( "Fuzhubiaoshiid" );
         cMap.setAutoIncrement(false);
         cMap.setProtected(false);
+        cMap.setDescription("辅助标识，标识唯一");
         cMap.setInheritance("false");
         cMap.setSize( 300 );
         cMap.setPosition(6);

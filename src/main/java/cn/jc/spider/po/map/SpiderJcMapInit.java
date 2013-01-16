@@ -15,15 +15,13 @@ public class SpiderJcMapInit
     public static final void init()
         throws TorqueException
     {
-        cn.jc.spider.po.CityDianpingPeer.getMapBuilder();
+        cn.jc.spider.po.ObjectattrPeer.getMapBuilder();
+        cn.jc.spider.po.ObjectitemPeer.getMapBuilder();
         cn.jc.spider.po.ParserPeer.getMapBuilder();
-        cn.jc.spider.po.ParserCopyPeer.getMapBuilder();
-        cn.jc.spider.po.ShangquanDianpingPeer.getMapBuilder();
         cn.jc.spider.po.SitePeer.getMapBuilder();
         cn.jc.spider.po.StorerPeer.getMapBuilder();
         cn.jc.spider.po.TaskPeer.getMapBuilder();
         cn.jc.spider.po.UnvisitedurlPeer.getMapBuilder();
         cn.jc.spider.po.VisitedurlPeer.getMapBuilder();
-        cn.jc.spider.po.XiaohuaPeer.getMapBuilder();
     }
 }

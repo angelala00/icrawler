@@ -128,7 +128,7 @@ public abstract class BaseUnvisitedurl extends BaseObject
      *
      * @param v new value
      */
-    public void setWebsite(String v) 
+    public void setWebsite(String v) throws TorqueException
     {
 
         if (!ObjectUtils.equals(this.website, v))
@@ -137,6 +137,11 @@ public abstract class BaseUnvisitedurl extends BaseObject
             setModified(true);
         }
 
+
+        if (aSite != null && !ObjectUtils.equals(aSite.getWebsite(), v))
+        {
+            aSite = null;
+        }
 
     }
 
@@ -224,7 +229,82 @@ public abstract class BaseUnvisitedurl extends BaseObject
 
     }
 
-       
+    
+
+
+
+    private Site aSite;
+
+    /**
+     * Declares an association between this object and a Site object
+     *
+     * @param v Site
+     * @throws TorqueException
+     */
+    public void setSite(Site v) throws TorqueException
+    {
+        if (v == null)
+        {
+            setWebsite((String) null);
+        }
+        else
+        {
+            setWebsite(v.getWebsite());
+        }
+        aSite = v;
+    }
+
+
+    /**
+     * Returns the associated Site object.
+     * If it was not retrieved before, the object is retrieved from
+     * the database
+     *
+     * @return the associated Site object
+     * @throws TorqueException
+     */
+    public Site getSite()
+        throws TorqueException
+    {
+        if (aSite == null && (!ObjectUtils.equals(this.website, null)))
+        {
+            aSite = SitePeer.retrieveByPK(SimpleKey.keyFor(this.website));
+        }
+        return aSite;
+    }
+
+    /**
+     * Return the associated Site object
+     * If it was not retrieved before, the object is retrieved from
+     * the database using the passed connection
+     *
+     * @param connection the connection used to retrieve the associated object
+     *        from the database, if it was not retrieved before
+     * @return the associated Site object
+     * @throws TorqueException
+     */
+    public Site getSite(Connection connection)
+        throws TorqueException
+    {
+        if (aSite == null && (!ObjectUtils.equals(this.website, null)))
+        {
+            aSite = SitePeer.retrieveByPK(SimpleKey.keyFor(this.website), connection);
+        }
+        return aSite;
+    }
+
+    /**
+     * Provides convenient way to set a relationship based on a
+     * ObjectKey, for example
+     * <code>bar.setFooKey(foo.getPrimaryKey())</code>
+     *
+     */
+    public void setSiteKey(ObjectKey key) throws TorqueException
+    {
+
+        setWebsite(key.toString());
+    }
+   
         
     private static List fieldNames = null;
 

@@ -168,7 +168,7 @@ public class SiteMapBuilder implements MapBuilder
         cMap.setTorqueType( "TIMESTAMP" );
         cMap.setUsePrimitive(true);
         cMap.setPrimaryKey(false);
-        cMap.setNotNull(true);
+        cMap.setNotNull(false);
         cMap.setJavaName( "Createtime" );
         cMap.setAutoIncrement(false);
         cMap.setProtected(false);
@@ -181,7 +181,7 @@ public class SiteMapBuilder implements MapBuilder
         cMap.setTorqueType( "TIMESTAMP" );
         cMap.setUsePrimitive(true);
         cMap.setPrimaryKey(false);
-        cMap.setNotNull(true);
+        cMap.setNotNull(false);
         cMap.setJavaName( "Updatetime" );
         cMap.setAutoIncrement(false);
         cMap.setProtected(false);

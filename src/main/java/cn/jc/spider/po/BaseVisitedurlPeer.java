@@ -809,6 +809,96 @@ public abstract class BaseVisitedurlPeer
 
 
     /**
+     * selects a collection of Visitedurl objects pre-filled with their
+     * Site objects.
+     *
+     * This method is protected by default in order to keep the public
+     * api reasonable.  You can provide public methods for those you
+     * actually need in VisitedurlPeer.
+     *
+     * @throws TorqueException Any exceptions caught during processing will be
+     *         rethrown wrapped into a TorqueException.
+     */
+    protected static List doSelectJoinSite(Criteria criteria)
+        throws TorqueException
+    {
+        return doSelectJoinSite(criteria, null);
+    }
+
+    /**
+     * selects a collection of Visitedurl objects pre-filled with their
+     * Site objects.
+     *
+     * This method is protected by default in order to keep the public
+     * api reasonable.  You can provide public methods for those you
+     * actually need in VisitedurlPeer.
+     *
+     * @throws TorqueException Any exceptions caught during processing will be
+     *         rethrown wrapped into a TorqueException.
+     */
+    protected static List doSelectJoinSite(Criteria criteria, Connection conn)
+        throws TorqueException
+    {
+        setDbName(criteria);
+
+        VisitedurlPeer.addSelectColumns(criteria);
+        int offset = numColumns + 1;
+        SitePeer.addSelectColumns(criteria);
+
+        criteria.addJoin(VisitedurlPeer.WEBSITE,
+            SitePeer.WEBSITE);
+
+        correctBooleans(criteria);
+
+        List rows;
+        if (conn == null)
+        {
+            rows = BasePeer.doSelect(criteria);
+        }
+        else
+        {
+            rows = BasePeer.doSelect(criteria,conn);
+        }
+
+        List results = new ArrayList();
+
+        for (int i = 0; i < rows.size(); i++)
+        {
+            Record row = (Record) rows.get(i);
+
+            Class omClass = VisitedurlPeer.getOMClass();
+            Visitedurl obj1 = (Visitedurl) VisitedurlPeer
+                .row2Object(row, 1, omClass);
+             omClass = SitePeer.getOMClass();
+            Site obj2 = (Site) SitePeer
+                .row2Object(row, offset, omClass);
+
+            boolean newObject = true;
+            for (int j = 0; j < results.size(); j++)
+            {
+                Visitedurl temp_obj1 = (Visitedurl) results.get(j);
+                Site temp_obj2 = (Site) temp_obj1.getSite();
+                if (temp_obj2.getPrimaryKey().equals(obj2.getPrimaryKey()))
+                {
+                    newObject = false;
+                    temp_obj2.addVisitedurl(obj1);
+                    break;
+                }
+            }
+            if (newObject)
+            {
+                obj2.initVisitedurls();
+                obj2.addVisitedurl(obj1);
+            }
+            results.add(obj1);
+        }
+        return results;
+    }
+
+
+
+
+    /**
      * Returns the TableMap related to this peer.
      *
      * @throws TorqueException Any exceptions caught during processing will be

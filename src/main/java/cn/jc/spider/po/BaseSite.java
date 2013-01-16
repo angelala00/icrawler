@@ -109,7 +109,7 @@ public abstract class BaseSite extends BaseObject
      *
      * @param v new value
      */
-    public void setWebsite(String v) 
+    public void setWebsite(String v) throws TorqueException
     {
 
         if (!ObjectUtils.equals(this.website, v))
@@ -119,6 +119,36 @@ public abstract class BaseSite extends BaseObject
         }
 
 
+
+        // update associated Objectattr
+        if (collObjectattrs != null)
+        {
+            for (int i = 0; i < collObjectattrs.size(); i++)
+            {
+                ((Objectattr) collObjectattrs.get(i))
+                        .setWebsite(v);
+            }
+        }
+
+        // update associated Unvisitedurl
+        if (collUnvisitedurls != null)
+        {
+            for (int i = 0; i < collUnvisitedurls.size(); i++)
+            {
+                ((Unvisitedurl) collUnvisitedurls.get(i))
+                        .setWebsite(v);
+            }
+        }
+
+        // update associated Visitedurl
+        if (collVisitedurls != null)
+        {
+            for (int i = 0; i < collVisitedurls.size(); i++)
+            {
+                ((Visitedurl) collVisitedurls.get(i))
+                        .setWebsite(v);
+            }
+        }
     }
 
     /**
@@ -318,6 +348,705 @@ public abstract class BaseSite extends BaseObject
     }
 
        
+
+
+    /**
+     * Collection to store aggregation of collObjectattrs
+     */
+    protected List collObjectattrs;
+
+    /**
+     * Temporary storage of collObjectattrs to save a possible db hit in
+     * the event objects are add to the collection, but the
+     * complete collection is never requested.
+     */
+    protected void initObjectattrs()
+    {
+        if (collObjectattrs == null)
+        {
+            collObjectattrs = new ArrayList();
+        }
+    }
+
+
+    /**
+     * Method called to associate a Objectattr object to this object
+     * through the Objectattr foreign key attribute
+     *
+     * @param l Objectattr
+     * @throws TorqueException
+     */
+    public void addObjectattr(Objectattr l) throws TorqueException
+    {
+        getObjectattrs().add(l);
+        l.setSite((Site) this);
+    }
+
+    /**
+     * Method called to associate a Objectattr object to this object
+     * through the Objectattr foreign key attribute using connection.
+     *
+     * @param l Objectattr
+     * @throws TorqueException
+     */
+    public void addObjectattr(Objectattr l, Connection con) throws TorqueException
+    {
+        getObjectattrs(con).add(l);
+        l.setSite((Site) this);
+    }
+
+    /**
+     * The criteria used to select the current contents of collObjectattrs
+     */
+    private Criteria lastObjectattrsCriteria = null;
+
+    /**
+     * If this collection has already been initialized, returns
+     * the collection. Otherwise returns the results of
+     * getObjectattrs(new Criteria())
+     *
+     * @return the collection of associated objects
+     * @throws TorqueException
+     */
+    public List getObjectattrs()
+        throws TorqueException
+    {
+        if (collObjectattrs == null)
+        {
+            collObjectattrs = getObjectattrs(new Criteria(10));
+        }
+        return collObjectattrs;
+    }
+
+    /**
+     * If this collection has already been initialized with
+     * an identical criteria, it returns the collection.
+     * Otherwise if this Site has previously
+     * been saved, it will retrieve related Objectattrs from storage.
+     * If this Site is new, it will return
+     * an empty collection or the current collection, the criteria
+     * is ignored on a new object.
+     *
+     * @throws TorqueException
+     */
+    public List getObjectattrs(Criteria criteria) throws TorqueException
+    {
+        if (collObjectattrs == null)
+        {
+            if (isNew())
+            {
+               collObjectattrs = new ArrayList();
+            }
+            else
+            {
+                criteria.add(ObjectattrPeer.WEBSITE, getWebsite() );
+                collObjectattrs = ObjectattrPeer.doSelect(criteria);
+            }
+        }
+        else
+        {
+            // criteria has no effect for a new object
+            if (!isNew())
+            {
+                // the following code is to determine if a new query is
+                // called for.  If the criteria is the same as the last
+                // one, just return the collection.
+                criteria.add(ObjectattrPeer.WEBSITE, getWebsite());
+                if (!lastObjectattrsCriteria.equals(criteria))
+                {
+                    collObjectattrs = ObjectattrPeer.doSelect(criteria);
+                }
+            }
+        }
+        lastObjectattrsCriteria = criteria;
+
+        return collObjectattrs;
+    }
+
+    /**
+     * If this collection has already been initialized, returns
+     * the collection. Otherwise returns the results of
+     * getObjectattrs(new Criteria(),Connection)
+     * This method takes in the Connection also as input so that
+     * referenced objects can also be obtained using a Connection
+     * that is taken as input
+     */
+    public List getObjectattrs(Connection con) throws TorqueException
+    {
+        if (collObjectattrs == null)
+        {
+            collObjectattrs = getObjectattrs(new Criteria(10), con);
+        }
+        return collObjectattrs;
+    }
+
+    /**
+     * If this collection has already been initialized with
+     * an identical criteria, it returns the collection.
+     * Otherwise if this Site has previously
+     * been saved, it will retrieve related Objectattrs from storage.
+     * If this Site is new, it will return
+     * an empty collection or the current collection, the criteria
+     * is ignored on a new object.
+     * This method takes in the Connection also as input so that
+     * referenced objects can also be obtained using a Connection
+     * that is taken as input
+     */
+    public List getObjectattrs(Criteria criteria, Connection con)
+            throws TorqueException
+    {
+        if (collObjectattrs == null)
+        {
+            if (isNew())
+            {
+               collObjectattrs = new ArrayList();
+            }
+            else
+            {
+                 criteria.add(ObjectattrPeer.WEBSITE, getWebsite());
+                 collObjectattrs = ObjectattrPeer.doSelect(criteria, con);
+             }
+         }
+         else
+         {
+             // criteria has no effect for a new object
+             if (!isNew())
+             {
+                 // the following code is to determine if a new query is
+                 // called for.  If the criteria is the same as the last
+                 // one, just return the collection.
+                 criteria.add(ObjectattrPeer.WEBSITE, getWebsite());
+                 if (!lastObjectattrsCriteria.equals(criteria))
+                 {
+                     collObjectattrs = ObjectattrPeer.doSelect(criteria, con);
+                 }
+             }
+         }
+         lastObjectattrsCriteria = criteria;
+
+         return collObjectattrs;
+     }
+
+
+
+
+
+
+
+
+
+
+
+    /**
+     * If this collection has already been initialized with
+     * an identical criteria, it returns the collection.
+     * Otherwise if this Site is new, it will return
+     * an empty collection; or if this Site has previously
+     * been saved, it will retrieve related Objectattrs from storage.
+     *
+     * This method is protected by default in order to keep the public
+     * api reasonable.  You can provide public methods for those you
+     * actually need in Site.
+     */
+    protected List getObjectattrsJoinSite(Criteria criteria)
+        throws TorqueException
+    {
+        if (collObjectattrs == null)
+        {
+            if (isNew())
+            {
+               collObjectattrs = new ArrayList();
+            }
+            else
+            {
+                criteria.add(ObjectattrPeer.WEBSITE, getWebsite());
+                collObjectattrs = ObjectattrPeer.doSelectJoinSite(criteria);
+            }
+        }
+        else
+        {
+            // the following code is to determine if a new query is
+            // called for.  If the criteria is the same as the last
+            // one, just return the collection.
+            criteria.add(ObjectattrPeer.WEBSITE, getWebsite());
+            if (!lastObjectattrsCriteria.equals(criteria))
+            {
+                collObjectattrs = ObjectattrPeer.doSelectJoinSite(criteria);
+            }
+        }
+        lastObjectattrsCriteria = criteria;
+
+        return collObjectattrs;
+    }
+
+
+
+
+
+    /**
+     * Collection to store aggregation of collUnvisitedurls
+     */
+    protected List collUnvisitedurls;
+
+    /**
+     * Temporary storage of collUnvisitedurls to save a possible db hit in
+     * the event objects are add to the collection, but the
+     * complete collection is never requested.
+     */
+    protected void initUnvisitedurls()
+    {
+        if (collUnvisitedurls == null)
+        {
+            collUnvisitedurls = new ArrayList();
+        }
+    }
+
+
+    /**
+     * Method called to associate a Unvisitedurl object to this object
+     * through the Unvisitedurl foreign key attribute
+     *
+     * @param l Unvisitedurl
+     * @throws TorqueException
+     */
+    public void addUnvisitedurl(Unvisitedurl l) throws TorqueException
+    {
+        getUnvisitedurls().add(l);
+        l.setSite((Site) this);
+    }
+
+    /**
+     * Method called to associate a Unvisitedurl object to this object
+     * through the Unvisitedurl foreign key attribute using connection.
+     *
+     * @param l Unvisitedurl
+     * @throws TorqueException
+     */
+    public void addUnvisitedurl(Unvisitedurl l, Connection con) throws TorqueException
+    {
+        getUnvisitedurls(con).add(l);
+        l.setSite((Site) this);
+    }
+
+    /**
+     * The criteria used to select the current contents of collUnvisitedurls
+     */
+    private Criteria lastUnvisitedurlsCriteria = null;
+
+    /**
+     * If this collection has already been initialized, returns
+     * the collection. Otherwise returns the results of
+     * getUnvisitedurls(new Criteria())
+     *
+     * @return the collection of associated objects
+     * @throws TorqueException
+     */
+    public List getUnvisitedurls()
+        throws TorqueException
+    {
+        if (collUnvisitedurls == null)
+        {
+            collUnvisitedurls = getUnvisitedurls(new Criteria(10));
+        }
+        return collUnvisitedurls;
+    }
+
+    /**
+     * If this collection has already been initialized with
+     * an identical criteria, it returns the collection.
+     * Otherwise if this Site has previously
+     * been saved, it will retrieve related Unvisitedurls from storage.
+     * If this Site is new, it will return
+     * an empty collection or the current collection, the criteria
+     * is ignored on a new object.
+     *
+     * @throws TorqueException
+     */
+    public List getUnvisitedurls(Criteria criteria) throws TorqueException
+    {
+        if (collUnvisitedurls == null)
+        {
+            if (isNew())
+            {
+               collUnvisitedurls = new ArrayList();
+            }
+            else
+            {
+                criteria.add(UnvisitedurlPeer.WEBSITE, getWebsite() );
+                collUnvisitedurls = UnvisitedurlPeer.doSelect(criteria);
+            }
+        }
+        else
+        {
+            // criteria has no effect for a new object
+            if (!isNew())
+            {
+                // the following code is to determine if a new query is
+                // called for.  If the criteria is the same as the last
+                // one, just return the collection.
+                criteria.add(UnvisitedurlPeer.WEBSITE, getWebsite());
+                if (!lastUnvisitedurlsCriteria.equals(criteria))
+                {
+                    collUnvisitedurls = UnvisitedurlPeer.doSelect(criteria);
+                }
+            }
+        }
+        lastUnvisitedurlsCriteria = criteria;
+
+        return collUnvisitedurls;
+    }
+
+    /**
+     * If this collection has already been initialized, returns
+     * the collection. Otherwise returns the results of
+     * getUnvisitedurls(new Criteria(),Connection)
+     * This method takes in the Connection also as input so that
+     * referenced objects can also be obtained using a Connection
+     * that is taken as input
+     */
+    public List getUnvisitedurls(Connection con) throws TorqueException
+    {
+        if (collUnvisitedurls == null)
+        {
+            collUnvisitedurls = getUnvisitedurls(new Criteria(10), con);
+        }
+        return collUnvisitedurls;
+    }
+
+    /**
+     * If this collection has already been initialized with
+     * an identical criteria, it returns the collection.
+     * Otherwise if this Site has previously
+     * been saved, it will retrieve related Unvisitedurls from storage.
+     * If this Site is new, it will return
+     * an empty collection or the current collection, the criteria
+     * is ignored on a new object.
+     * This method takes in the Connection also as input so that
+     * referenced objects can also be obtained using a Connection
+     * that is taken as input
+     */
+    public List getUnvisitedurls(Criteria criteria, Connection con)
+            throws TorqueException
+    {
+        if (collUnvisitedurls == null)
+        {
+            if (isNew())
+            {
+               collUnvisitedurls = new ArrayList();
+            }
+            else
+            {
+                 criteria.add(UnvisitedurlPeer.WEBSITE, getWebsite());
+                 collUnvisitedurls = UnvisitedurlPeer.doSelect(criteria, con);
+             }
+         }
+         else
+         {
+             // criteria has no effect for a new object
+             if (!isNew())
+             {
+                 // the following code is to determine if a new query is
+                 // called for.  If the criteria is the same as the last
+                 // one, just return the collection.
+                 criteria.add(UnvisitedurlPeer.WEBSITE, getWebsite());
+                 if (!lastUnvisitedurlsCriteria.equals(criteria))
+                 {
+                     collUnvisitedurls = UnvisitedurlPeer.doSelect(criteria, con);
+                 }
+             }
+         }
+         lastUnvisitedurlsCriteria = criteria;
+
+         return collUnvisitedurls;
+     }
+
+
+
+
+
+
+
+
+
+
+
+    /**
+     * If this collection has already been initialized with
+     * an identical criteria, it returns the collection.
+     * Otherwise if this Site is new, it will return
+     * an empty collection; or if this Site has previously
+     * been saved, it will retrieve related Unvisitedurls from storage.
+     *
+     * This method is protected by default in order to keep the public
+     * api reasonable.  You can provide public methods for those you
+     * actually need in Site.
+     */
+    protected List getUnvisitedurlsJoinSite(Criteria criteria)
+        throws TorqueException
+    {
+        if (collUnvisitedurls == null)
+        {
+            if (isNew())
+            {
+               collUnvisitedurls = new ArrayList();
+            }
+            else
+            {
+                criteria.add(UnvisitedurlPeer.WEBSITE, getWebsite());
+                collUnvisitedurls = UnvisitedurlPeer.doSelectJoinSite(criteria);
+            }
+        }
+        else
+        {
+            // the following code is to determine if a new query is
+            // called for.  If the criteria is the same as the last
+            // one, just return the collection.
+            criteria.add(UnvisitedurlPeer.WEBSITE, getWebsite());
+            if (!lastUnvisitedurlsCriteria.equals(criteria))
+            {
+                collUnvisitedurls = UnvisitedurlPeer.doSelectJoinSite(criteria);
+            }
+        }
+        lastUnvisitedurlsCriteria = criteria;
+
+        return collUnvisitedurls;
+    }
+
+
+
+
+
+    /**
+     * Collection to store aggregation of collVisitedurls
+     */
+    protected List collVisitedurls;
+
+    /**
+     * Temporary storage of collVisitedurls to save a possible db hit in
+     * the event objects are add to the collection, but the
+     * complete collection is never requested.
+     */
+    protected void initVisitedurls()
+    {
+        if (collVisitedurls == null)
+        {
+            collVisitedurls = new ArrayList();
+        }
+    }
+
+
+    /**
+     * Method called to associate a Visitedurl object to this object
+     * through the Visitedurl foreign key attribute
+     *
+     * @param l Visitedurl
+     * @throws TorqueException
+     */
+    public void addVisitedurl(Visitedurl l) throws TorqueException
+    {
+        getVisitedurls().add(l);
+        l.setSite((Site) this);
+    }
+
+    /**
+     * Method called to associate a Visitedurl object to this object
+     * through the Visitedurl foreign key attribute using connection.
+     *
+     * @param l Visitedurl
+     * @throws TorqueException
+     */
+    public void addVisitedurl(Visitedurl l, Connection con) throws TorqueException
+    {
+        getVisitedurls(con).add(l);
+        l.setSite((Site) this);
+    }
+
+    /**
+     * The criteria used to select the current contents of collVisitedurls
+     */
+    private Criteria lastVisitedurlsCriteria = null;
+
+    /**
+     * If this collection has already been initialized, returns
+     * the collection. Otherwise returns the results of
+     * getVisitedurls(new Criteria())
+     *
+     * @return the collection of associated objects
+     * @throws TorqueException
+     */
+    public List getVisitedurls()
+        throws TorqueException
+    {
+        if (collVisitedurls == null)
+        {
+            collVisitedurls = getVisitedurls(new Criteria(10));
+        }
+        return collVisitedurls;
+    }
+
+    /**
+     * If this collection has already been initialized with
+     * an identical criteria, it returns the collection.
+     * Otherwise if this Site has previously
+     * been saved, it will retrieve related Visitedurls from storage.
+     * If this Site is new, it will return
+     * an empty collection or the current collection, the criteria
+     * is ignored on a new object.
+     *
+     * @throws TorqueException
+     */
+    public List getVisitedurls(Criteria criteria) throws TorqueException
+    {
+        if (collVisitedurls == null)
+        {
+            if (isNew())
+            {
+               collVisitedurls = new ArrayList();
+            }
+            else
+            {
+                criteria.add(VisitedurlPeer.WEBSITE, getWebsite() );
+                collVisitedurls = VisitedurlPeer.doSelect(criteria);
+            }
+        }
+        else
+        {
+            // criteria has no effect for a new object
+            if (!isNew())
+            {
+                // the following code is to determine if a new query is
+                // called for.  If the criteria is the same as the last
+                // one, just return the collection.
+                criteria.add(VisitedurlPeer.WEBSITE, getWebsite());
+                if (!lastVisitedurlsCriteria.equals(criteria))
+                {
+                    collVisitedurls = VisitedurlPeer.doSelect(criteria);
+                }
+            }
+        }
+        lastVisitedurlsCriteria = criteria;
+
+        return collVisitedurls;
+    }
+
+    /**
+     * If this collection has already been initialized, returns
+     * the collection. Otherwise returns the results of
+     * getVisitedurls(new Criteria(),Connection)
+     * This method takes in the Connection also as input so that
+     * referenced objects can also be obtained using a Connection
+     * that is taken as input
+     */
+    public List getVisitedurls(Connection con) throws TorqueException
+    {
+        if (collVisitedurls == null)
+        {
+            collVisitedurls = getVisitedurls(new Criteria(10), con);
+        }
+        return collVisitedurls;
+    }
+
+    /**
+     * If this collection has already been initialized with
+     * an identical criteria, it returns the collection.
+     * Otherwise if this Site has previously
+     * been saved, it will retrieve related Visitedurls from storage.
+     * If this Site is new, it will return
+     * an empty collection or the current collection, the criteria
+     * is ignored on a new object.
+     * This method takes in the Connection also as input so that
+     * referenced objects can also be obtained using a Connection
+     * that is taken as input
+     */
+    public List getVisitedurls(Criteria criteria, Connection con)
+            throws TorqueException
+    {
+        if (collVisitedurls == null)
+        {
+            if (isNew())
+            {
+               collVisitedurls = new ArrayList();
+            }
+            else
+            {
+                 criteria.add(VisitedurlPeer.WEBSITE, getWebsite());
+                 collVisitedurls = VisitedurlPeer.doSelect(criteria, con);
+             }
+         }
+         else
+         {
+             // criteria has no effect for a new object
+             if (!isNew())
+             {
+                 // the following code is to determine if a new query is
+                 // called for.  If the criteria is the same as the last
+                 // one, just return the collection.
+                 criteria.add(VisitedurlPeer.WEBSITE, getWebsite());
+                 if (!lastVisitedurlsCriteria.equals(criteria))
+                 {
+                     collVisitedurls = VisitedurlPeer.doSelect(criteria, con);
+                 }
+             }
+         }
+         lastVisitedurlsCriteria = criteria;
+
+         return collVisitedurls;
+     }
+
+
+
+
+
+
+
+
+
+
+
+    /**
+     * If this collection has already been initialized with
+     * an identical criteria, it returns the collection.
+     * Otherwise if this Site is new, it will return
+     * an empty collection; or if this Site has previously
+     * been saved, it will retrieve related Visitedurls from storage.
+     *
+     * This method is protected by default in order to keep the public
+     * api reasonable.  You can provide public methods for those you
+     * actually need in Site.
+     */
+    protected List getVisitedurlsJoinSite(Criteria criteria)
+        throws TorqueException
+    {
+        if (collVisitedurls == null)
+        {
+            if (isNew())
+            {
+               collVisitedurls = new ArrayList();
+            }
+            else
+            {
+                criteria.add(VisitedurlPeer.WEBSITE, getWebsite());
+                collVisitedurls = VisitedurlPeer.doSelectJoinSite(criteria);
+            }
+        }
+        else
+        {
+            // the following code is to determine if a new query is
+            // called for.  If the criteria is the same as the last
+            // one, just return the collection.
+            criteria.add(VisitedurlPeer.WEBSITE, getWebsite());
+            if (!lastVisitedurlsCriteria.equals(criteria))
+            {
+                collVisitedurls = VisitedurlPeer.doSelectJoinSite(criteria);
+            }
+        }
+        lastVisitedurlsCriteria = criteria;
+
+        return collVisitedurls;
+    }
+
+
+
         
     private static List fieldNames = null;
 
@@ -767,6 +1496,30 @@ public abstract class BaseSite extends BaseObject
                 }
             }
 
+
+            if (collObjectattrs != null)
+            {
+                for (int i = 0; i < collObjectattrs.size(); i++)
+                {
+                    ((Objectattr) collObjectattrs.get(i)).save(con);
+                }
+            }
+
+            if (collUnvisitedurls != null)
+            {
+                for (int i = 0; i < collUnvisitedurls.size(); i++)
+                {
+                    ((Unvisitedurl) collUnvisitedurls.get(i)).save(con);
+                }
+            }
+
+            if (collVisitedurls != null)
+            {
+                for (int i = 0; i < collVisitedurls.size(); i++)
+                {
+                    ((Visitedurl) collVisitedurls.get(i)).save(con);
+                }
+            }
             alreadyInSave = false;
         }
     }
@@ -905,6 +1658,51 @@ public abstract class BaseSite extends BaseObject
 
         if (deepcopy)
         {
+
+
+        List vObjectattrs = getObjectattrs();
+        if (vObjectattrs != null)
+        {
+            for (int i = 0; i < vObjectattrs.size(); i++)
+            {
+                Objectattr obj = (Objectattr) vObjectattrs.get(i);
+                copyObj.addObjectattr(obj.copy());
+            }
+        }
+        else
+        {
+            copyObj.collObjectattrs = null;
+        }
+
+
+        List vUnvisitedurls = getUnvisitedurls();
+        if (vUnvisitedurls != null)
+        {
+            for (int i = 0; i < vUnvisitedurls.size(); i++)
+            {
+                Unvisitedurl obj = (Unvisitedurl) vUnvisitedurls.get(i);
+                copyObj.addUnvisitedurl(obj.copy());
+            }
+        }
+        else
+        {
+            copyObj.collUnvisitedurls = null;
+        }
+
+
+        List vVisitedurls = getVisitedurls();
+        if (vVisitedurls != null)
+        {
+            for (int i = 0; i < vVisitedurls.size(); i++)
+            {
+                Visitedurl obj = (Visitedurl) vVisitedurls.get(i);
+                copyObj.addVisitedurl(obj.copy());
+            }
+        }
+        else
+        {
+            copyObj.collVisitedurls = null;
+        }
         }
         return copyObj;
     }
@@ -935,6 +1733,51 @@ public abstract class BaseSite extends BaseObject
 
         if (deepcopy)
         {
+
+
+        List vObjectattrs = getObjectattrs(con);
+        if (vObjectattrs != null)
+        {
+            for (int i = 0; i < vObjectattrs.size(); i++)
+            {
+                Objectattr obj = (Objectattr) vObjectattrs.get(i);
+                copyObj.addObjectattr(obj.copy(con), con);
+            }
+        }
+        else
+        {
+            copyObj.collObjectattrs = null;
+        }
+
+
+        List vUnvisitedurls = getUnvisitedurls(con);
+        if (vUnvisitedurls != null)
+        {
+            for (int i = 0; i < vUnvisitedurls.size(); i++)
+            {
+                Unvisitedurl obj = (Unvisitedurl) vUnvisitedurls.get(i);
+                copyObj.addUnvisitedurl(obj.copy(con), con);
+            }
+        }
+        else
+        {
+            copyObj.collUnvisitedurls = null;
+        }
+
+
+        List vVisitedurls = getVisitedurls(con);
+        if (vVisitedurls != null)
+        {
+            for (int i = 0; i < vVisitedurls.size(); i++)
+            {
+                Visitedurl obj = (Visitedurl) vVisitedurls.get(i);
+                copyObj.addVisitedurl(obj.copy(con), con);
+            }
+        }
+        else
+        {
+            copyObj.collVisitedurls = null;
+        }
         }
         return copyObj;
     }

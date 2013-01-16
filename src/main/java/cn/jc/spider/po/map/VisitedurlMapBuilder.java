@@ -104,6 +104,7 @@ public class VisitedurlMapBuilder implements MapBuilder
         cMap.setProtected(false);
         cMap.setInheritance("false");
         cMap.setSize( 25 );
+        cMap.setForeignKey("site", "website");
         cMap.setPosition(2);
         tMap.addColumn(cMap);
   // ------------- Column: url --------------------
