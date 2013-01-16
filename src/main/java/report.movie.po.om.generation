@@ -18,21 +18,28 @@ correctGetters =
     Managers generated in package cn.jc.spider.po
     Beans generated in package cn.jc.spider.po.bean
 
-    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
+    Failed to create dir or dir already exists: E:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
 
-    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
-
-
+    Failed to create dir or dir already exists: E:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
 
 
-        city_dianping
+
+
+        objectattr
 
         
 
 
-          
 
-          
+
+
+
+        objectitem
+
+        
+
+
+
 
 
 
@@ -42,28 +49,6 @@ correctGetters =
 
 
 
-
-
-
-        parser_copy
-
-        
-
-
-          
-
-          
-
-
-
-        shangquan_dianping
-
-        
-
-
-          
-
-          
 
 
 
@@ -109,17 +94,6 @@ correctGetters =
 
 
 
-
-
-
-        xiaohua
-
-        
-
-
-          
-
-          
 
 
 

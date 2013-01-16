@@ -1,15 +1,37 @@
 
 # -----------------------------------------------------------------------
-# city_dianping
+# objectattr
 # -----------------------------------------------------------------------
-drop table if exists city_dianping;
+drop table if exists objectattr;
 
-CREATE TABLE city_dianping
+CREATE TABLE objectattr
 (
     id INTEGER NOT NULL AUTO_INCREMENT,
-    name VARCHAR(20),
-    url VARCHAR(100),
-    url1 VARCHAR(100),
+    website VARCHAR(25),
+    attrname VARCHAR(15),
+    reg VARCHAR(100),
+    index INTEGER,
+    createtime TIMESTAMP,
+    updatetime TIMESTAMP,
+    operator VARCHAR(10),
+    PRIMARY KEY(id));
+
+
+# -----------------------------------------------------------------------
+# objectitem
+# -----------------------------------------------------------------------
+drop table if exists objectitem;
+
+CREATE TABLE objectitem
+(
+    id INTEGER NOT NULL AUTO_INCREMENT,
+    website VARCHAR(50),
+    appname VARCHAR(50),
+    appsize VARCHAR(10),
+    appurl VARCHAR(100),
+    imgurl VARCHAR(100),
+    appdesc VARCHAR(500),
+    createtime TIMESTAMP,
     PRIMARY KEY(id));
 
 
@@ -32,36 +54,6 @@ CREATE TABLE parser
 
 
 # -----------------------------------------------------------------------
-# parser_copy
-# -----------------------------------------------------------------------
-drop table if exists parser_copy;
-
-CREATE TABLE parser_copy
-(
-    id INTEGER NOT NULL AUTO_INCREMENT,
-    id_task INTEGER,
-    attr VARCHAR(30),
-    pattern VARCHAR(100),
-    methodtype VARCHAR(30),
-    attr_name VARCHAR(30),
-    PRIMARY KEY(id));
-
-
-# -----------------------------------------------------------------------
-# shangquan_dianping
-# -----------------------------------------------------------------------
-drop table if exists shangquan_dianping;
-
-CREATE TABLE shangquan_dianping
-(
-    id INTEGER NOT NULL AUTO_INCREMENT,
-    city VARCHAR(30),
-    distrist VARCHAR(30) NOT NULL,
-    shangquan VARCHAR(30) NOT NULL,
-    PRIMARY KEY(id));
-
-
-# -----------------------------------------------------------------------
 # site
 # -----------------------------------------------------------------------
 drop table if exists site;
@@ -74,8 +66,8 @@ CREATE TABLE site
     middlepageurlreg VARCHAR(100),
     targetpageurlreg VARCHAR(100),
     frequency VARCHAR(10),
-    createtime TIMESTAMP NOT NULL,
-    updatetime TIMESTAMP NOT NULL,
+    createtime TIMESTAMP,
+    updatetime TIMESTAMP,
     operator VARCHAR(10),
     PRIMARY KEY(id));
 
@@ -136,21 +128,21 @@ CREATE TABLE visitedurl
     url VARCHAR(200) NOT NULL,
     PRIMARY KEY(id));
 
+ALTER TABLE objectattr
+    ADD CONSTRAINT objectattr_FK_1
+    FOREIGN KEY (website)
+    REFERENCES site (website)
+;
 
-# -----------------------------------------------------------------------
-# xiaohua
-# -----------------------------------------------------------------------
-drop table if exists xiaohua;
+ALTER TABLE unvisitedurl
+    ADD CONSTRAINT unvisitedurl_FK_1
+    FOREIGN KEY (website)
+    REFERENCES site (website)
+;
 
-CREATE TABLE xiaohua
-(
-    id INTEGER NOT NULL AUTO_INCREMENT,
-    title VARCHAR(100),
-    content VARCHAR(500),
-    upcount VARCHAR(10),
-    downcount VARCHAR(10),
-    comentcount VARCHAR(10),
-    tags VARCHAR(10),
-    url VARCHAR(100),
-    PRIMARY KEY(id));
+ALTER TABLE visitedurl
+    ADD CONSTRAINT visitedurl_FK_1
+    FOREIGN KEY (website)
+    REFERENCES site (website)
+;
 

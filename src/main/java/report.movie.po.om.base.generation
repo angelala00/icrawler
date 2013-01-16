@@ -19,17 +19,29 @@ correctGetters =
     BaseBeans generated in package cn.jc.spider.po.bean
     Maps generated in package cn.jc.spider.po.map
 
-    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
+    Failed to create dir or dir already exists: E:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
 
-    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
+    Failed to create dir or dir already exists: E:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\
 
-    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\map\
+    Failed to create dir or dir already exists: E:\workspace_code\jc\icrawler\src\main\java/cn\jc\spider\po\map\
 
 
 
     
 
-        city_dianping
+        objectattr
+
+        
+
+        
+
+          
+
+
+          
+
+
+        objectitem
 
         
 
@@ -42,30 +54,6 @@ correctGetters =
 
 
         parser
-
-        
-
-        
-
-          
-
-
-          
-
-
-        parser_copy
-
-        
-
-        
-
-          
-
-
-          
-
-
-        shangquan_dianping
 
         
 
@@ -137,18 +125,6 @@ correctGetters =
           
 
 
-        xiaohua
-
-        
-
-        
-
-          
-
-
-          
-
-
 
 
 
@@ -156,6 +132,6 @@ correctGetters =
     
 
 ;
-    Failed to create dir or dir already exists: D:\workspace_code\jc\icrawler\src\main\java/org\apache\torque\linkage\
+    Failed to create dir or dir already exists: E:\workspace_code\jc\icrawler\src\main\java/org\apache\torque\linkage\
     
 
