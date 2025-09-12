@@ -1,2 +1,13 @@
-this is a icrawler project!
-welcome to join it!
+# icrawler
+
+Simple Python-based web crawler that downloads PDF files and converts web
+pages to PDF. Provide seed URLs and the crawler will follow links on those
+pages, downloading linked PDFs or rendering HTML pages to PDF files.
+
+## Usage
+
+```
+python -m icrawler.crawler <output_dir> <url1> [<url2> ...]
+```
+
+See `requirements.txt` for dependencies.

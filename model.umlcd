@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<com.yattasolutions.uml.diagrams.classifier:ClassDiagram xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:com.yattasolutions.uml.diagrams.classifier="http://ns.yatta-solutions.com/umllab/diagrams/classifier/1.1.0" xmi:id="_gNRnEDyaEeKHFeof2hYu4w">
-  <modelElement href="model.uml#_gK4aYDyaEeKHFeof2hYu4w"/>
-  <nodes xsi:type="com.yattasolutions.uml.diagrams.classifier:ClassifierVisual" xmi:id="_kdthgDyaEeKHFeof2hYu4w" name="NewClass1">
-    <modelElement href="model.uml#_kdjJcDyaEeKHFeof2hYu4w"/>
-    <visualProperties xmi:id="_kduIkDyaEeKHFeof2hYu4w" position="190.0,128.0" size="-1.0,-1.0"/>
-    <visibility xmi:id="_kduIkTyaEeKHFeof2hYu4w" label="+"/>
-  </nodes>
-</com.yattasolutions.uml.diagrams.classifier:ClassDiagram>
