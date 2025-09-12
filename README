@@ -7,7 +7,11 @@ pages, downloading linked PDFs or rendering HTML pages to PDF files.
 ## Usage
 
 ```
-python -m icrawler.crawler <output_dir> <url1> [<url2> ...]
+python -m icrawler.crawler [--delay N] [--jitter M] <output_dir> <url1> [<url2> ...]
 ```
+
+`--delay` specifies a minimum pause (in seconds) between HTTP requests while
+`--jitter` adds a random extra wait time up to the given value. This helps
+avoid hitting remote servers too aggressively.
 
 See `requirements.txt` for dependencies.
