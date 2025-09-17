@@ -824,3 +824,175 @@ def test_dump_structure_default_artifacts(tmp_path):
         data = json.load(handle)
     assert data["pages"]
     assert data["pages"][0]["html_path"].endswith("page_001_index.html")
+
+
+def test_download_from_structure_downloads_files(tmp_path):
+    structure_path = os.path.join(tmp_path, "structure.json")
+    output_dir = os.path.join(tmp_path, "downloads")
+    state_path = os.path.join(tmp_path, "state.json")
+    structure_data = {
+        "entries": [
+            {
+                "serial": 1,
+                "title": "测试公告",
+                "remark": "",
+                "documents": [
+                    {
+                        "url": "http://example.com/file1.pdf",
+                        "type": "pdf",
+                        "title": "附件一",
+                    }
+                ],
+            }
+        ]
+    }
+    with open(structure_path, "w", encoding="utf-8") as handle:
+        json.dump(structure_data, handle)
+
+    downloaded_targets = []
+    original_download_file = pbc_monitor.download_file
+    try:
+        def fake_download_file(session, file_url, out_dir, delay, jitter, timeout):
+            target = os.path.join(out_dir, os.path.basename(file_url))
+            os.makedirs(out_dir, exist_ok=True)
+            with open(target, "w", encoding="utf-8") as fh:
+                fh.write("dummy")
+            downloaded_targets.append(target)
+            return target
+
+        pbc_monitor.download_file = fake_download_file
+        result = pbc_monitor.download_from_structure(
+            structure_path,
+            output_dir,
+            state_path,
+            delay=0.1,
+            jitter=0.0,
+            timeout=5.0,
+        )
+    finally:
+        pbc_monitor.download_file = original_download_file
+
+    assert result == downloaded_targets
+    assert len(downloaded_targets) == 1
+    with open(state_path, "r", encoding="utf-8") as handle:
+        state_data = json.load(handle)
+    entry = state_data["entries"][0]
+    document = entry["documents"][0]
+    assert document["url"] == "http://example.com/file1.pdf"
+    assert document["downloaded"] is True
+    assert os.path.basename(document["local_path"]) == "file1.pdf"
+
+
+def test_download_from_structure_skips_existing(tmp_path):
+    structure_path = os.path.join(tmp_path, "structure.json")
+    output_dir = os.path.join(tmp_path, "downloads")
+    state_path = os.path.join(tmp_path, "state.json")
+    structure_data = {
+        "entries": [
+            {
+                "serial": 2,
+                "title": "公告二",
+                "remark": "",
+                "documents": [
+                    {
+                        "url": "http://example.com/file2.pdf",
+                        "type": "pdf",
+                        "title": "新附件名",
+                    }
+                ],
+            }
+        ]
+    }
+    with open(structure_path, "w", encoding="utf-8") as handle:
+        json.dump(structure_data, handle)
+
+    existing_state = {
+        "entries": [
+            {
+                "serial": 2,
+                "title": "公告二",
+                "remark": "",
+                "documents": [
+                    {
+                        "url": "http://example.com/file2.pdf",
+                        "type": "pdf",
+                        "title": "旧附件名",
+                        "downloaded": True,
+                        "local_path": "/tmp/file2.pdf",
+                    }
+                ],
+            }
+        ]
+    }
+    with open(state_path, "w", encoding="utf-8") as handle:
+        json.dump(existing_state, handle)
+
+    original_download_file = pbc_monitor.download_file
+    try:
+        def fail_download_file(*_args, **_kwargs):
+            raise AssertionError("download_file should not be called")
+
+        pbc_monitor.download_file = fail_download_file
+        result = pbc_monitor.download_from_structure(
+            structure_path,
+            output_dir,
+            state_path,
+            delay=0.1,
+            jitter=0.0,
+            timeout=5.0,
+        )
+    finally:
+        pbc_monitor.download_file = original_download_file
+
+    assert result == []
+    with open(state_path, "r", encoding="utf-8") as handle:
+        state_data = json.load(handle)
+    document = state_data["entries"][0]["documents"][0]
+    assert document["title"] == "新附件名"
+
+
+def test_main_download_from_structure(tmp_path):
+    artifact_dir = os.path.join(tmp_path, "artifacts")
+    structure_dir = os.path.join(artifact_dir, "structure")
+    os.makedirs(structure_dir, exist_ok=True)
+    structure_path = os.path.join(structure_dir, "structure.json")
+    with open(structure_path, "w", encoding="utf-8") as handle:
+        json.dump({"entries": []}, handle)
+
+    output_dir = os.path.join(tmp_path, "downloads")
+    config_path = os.path.join(tmp_path, "config.json")
+    config_data = {
+        "output_dir": output_dir,
+        "artifact_dir": artifact_dir,
+    }
+    with open(config_path, "w", encoding="utf-8") as handle:
+        json.dump(config_data, handle)
+
+    captured = {}
+    original_download_from_structure = pbc_monitor.download_from_structure
+    try:
+        def fake_download_from_structure(structure_path_arg, out_dir, state_file, delay, jitter, timeout):
+            captured.update(
+                {
+                    "structure_path": structure_path_arg,
+                    "output_dir": out_dir,
+                    "state_file": state_file,
+                    "delay": delay,
+                    "jitter": jitter,
+                    "timeout": timeout,
+                }
+            )
+            return []
+
+        pbc_monitor.download_from_structure = fake_download_from_structure
+        pbc_monitor.main(["--config", config_path, "--download-from-structure"])
+    finally:
+        pbc_monitor.download_from_structure = original_download_from_structure
+
+    assert captured["structure_path"] == structure_path
+    assert captured["output_dir"] == output_dir
+    expected_state = os.path.join(artifact_dir, "state", "state.json")
+    assert captured["state_file"] == expected_state
+    assert captured["delay"] == 3.0
+    assert captured["jitter"] == 2.0
+    assert captured["timeout"] == 30.0

@@ -557,6 +557,91 @@ def collect_new_files(
     return downloaded
 
 
+def download_from_structure(
+    structure_path: str,
+    output_dir: str,
+    state_file: Optional[str],
+    delay: float,
+    jitter: float,
+    timeout: float,
+) -> List[str]:
+    with open(structure_path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        return []
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+    state = load_state(state_file)
+    downloaded: List[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        entry_id = state.ensure_entry(entry)
+        documents = entry.get("documents")
+        if not isinstance(documents, list):
+            continue
+        for document in documents:
+            if isinstance(document, dict) and document.get("type") == "html":
+                state.merge_documents(entry_id, [document])
+        for document in documents:
+            if not isinstance(document, dict):
+                continue
+            file_url = document.get("url")
+            doc_type = document.get("type")
+            if not isinstance(file_url, str) or not file_url:
+                continue
+            if doc_type == "html":
+                continue
+            existing_title = ""
+            if state.is_downloaded(file_url):
+                existing_title = str(state.files.get(file_url, {}).get("title") or "").strip()
+            state.merge_documents(entry_id, [document])
+            stored_entry = state.entries.get(entry_id, {})
+            doc_record = None
+            for candidate in stored_entry.get("documents", []):
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("url") == file_url
+                ):
+                    doc_record = candidate
+                    break
+            if not doc_record:
+                continue
+            display_name = str(doc_record.get("title") or "").strip()
+            if state.is_downloaded(file_url):
+                if display_name and display_name != existing_title:
+                    save_state(state_file, state)
+                    print(f"Updated name for existing file: {display_name} -> {file_url}")
+                label = display_name or existing_title or file_url
+                print(f"Skipping existing file: {label} -> {file_url}")
+                continue
+            try:
+                path = download_file(
+                    session,
+                    file_url,
+                    output_dir,
+                    delay,
+                    jitter,
+                    timeout,
+                )
+                downloaded.append(path)
+                label = display_name or stored_entry.get("title") or file_url
+                state.mark_downloaded(
+                    entry_id,
+                    file_url,
+                    display_name or label,
+                    doc_type or classify_document_type(file_url),
+                    path,
+                )
+                save_state(state_file, state)
+                print(f"Downloaded: {label} -> {file_url}")
+            except Exception as exc:
+                print(f"Failed to download {file_url}: {exc}")
+    save_state(state_file, state)
+    return downloaded
+
+
 def snapshot_listing(
     start_url: str,
     delay: float,
@@ -767,6 +852,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         help="dump parsed listing structure to stdout or given file",
     )
     parser.add_argument(
+        "--download-from-structure",
+        nargs="?",
+        const="structure.json",
+        help="download attachments defined in a structure snapshot",
+    )
+    parser.add_argument(
         "--dump-from-file",
         metavar="HTML",
         nargs="?",
@@ -813,15 +904,27 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     max_hours = float(_resolve_setting(args.max_hours, config, "max_hours", 32.0))
     dump_value = _resolve_setting(args.dump_structure, config, "dump_structure")
     dump_target = _normalize_output_path(dump_value, "structure")
+    download_value = _resolve_setting(
+        args.download_from_structure, config, "download_from_structure"
+    )
+    download_target = (
+        _normalize_output_path(download_value, "structure") if download_value else None
+    )
     fetch_value = _resolve_setting(args.fetch_page, config, "fetch_page")
     fetch_target = _normalize_output_path(fetch_value, "pages") if fetch_value else None
     dump_from_file_value = args.dump_from_file
     dump_from_file = _normalize_output_path(dump_from_file_value, "pages") if dump_from_file_value else None
 
-    if not dump_from_file and start_url is None:
+    if not dump_from_file and not download_target and start_url is None:
         raise SystemExit("start_url must be provided via CLI or config")
 
-    if not fetch_target and not dump_target and not dump_from_file and output_dir is None:
+    if (
+        not fetch_target
+        and not dump_target
+        and not dump_from_file
+        and not download_target
+        and output_dir is None
+    ):
         raise SystemExit("output_dir must be provided via CLI or config")
 
     if dump_from_file:
@@ -853,6 +956,23 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             os.makedirs(os.path.dirname(dump_target), exist_ok=True)
             with open(str(dump_target), "w", encoding="utf-8") as handle:
                 json.dump(snapshot, handle, ensure_ascii=False, indent=2)
+        return
+
+    if download_target:
+        if download_target == "-":
+            raise SystemExit("--download-from-structure does not support '-' as input")
+        if not os.path.exists(download_target):
+            raise SystemExit(f"Structure file not found: {download_target}")
+        if output_dir is None:
+            raise SystemExit("output_dir must be provided to download attachments")
+        download_from_structure(
+            download_target,
+            str(output_dir),
+            state_file,
+            delay,
+            jitter,
+            timeout,
+        )
         return
 
     if args.run_once:

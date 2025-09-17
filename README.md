@@ -54,6 +54,16 @@ python -m icrawler.pbc_monitor --dump-structure structure.json
 输出 JSON 中除了 `entries` 之外，还会包含 `pages` 列表，记录每页的
 `pagination` 信息（如 `next`/`prev` 链接），便于判断是否还有后续分页。
 
+确认结构后，可使用结构文件驱动下载，无需再次遍历网页：
+
+```
+python -m icrawler.pbc_monitor --download-from-structure
+```
+
+该命令会读取默认的结构 JSON（位于 `artifacts/structure/structure.json`），
+根据其中的 `entries` 下载附件，并继续使用 `state.json` 标记已下载记录。
+若需使用其他路径，可在命令后追加文件名。
+
 为了避免频繁请求，可以先将起始页面下载到本地：
 
 ```
@@ -89,10 +99,14 @@ python -m icrawler.pbc_monitor --dump-from-file page.html
        `structure.json`，可在命令后跟自定义路径，或传 `-` 输出到终端）
        该命令会在线遍历全部分页并把结构写入指定文件，其中 `pages`
        数组列出每页的分页信息。
-     - `python -m icrawler.pbc_monitor --run-once`：直接按配置遍历所有分页
-       并下载附件，`state.json` 会记录已下载链接。
-5. 结构确认无误后，再执行 `--run-once`（或循环模式）下载附件，`state.json`
-   会记录已下载的链接，方便后续增量更新。
+    - `python -m icrawler.pbc_monitor --download-from-structure`：
+      默认读取 `artifacts/structure/structure.json` 并下载附件，避免再次遍历网页
+      （可在命令后指定其他结构文件）。
+     - 或用 `python -m icrawler.pbc_monitor --run-once`：从配置的起始页面开始
+       实时遍历分页并下载附件，`state.json` 会记录已下载链接。
+5. 结构确认无误后，可选择基于 `--download-from-structure` 的离线下载，或
+   直接执行 `--run-once`（或循环模式）进行在线抓取。`state.json` 会记录已
+   下载的链接，方便后续增量更新。
 
 ### 默认输出目录
 
