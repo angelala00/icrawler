@@ -88,7 +88,8 @@ def iterate_listing_pages(
     delay: float,
     jitter: float,
     timeout: float,
-) -> Iterable[Tuple[str, BeautifulSoup]]:
+    page_cache_dir: Optional[str] = None,
+) -> Iterable[Tuple[str, BeautifulSoup, Optional[str]]]:
     queue: List[str] = [start_url]
     visited: Set[str] = set()
     while queue:
@@ -96,8 +97,30 @@ def iterate_listing_pages(
         if url in visited:
             continue
         html = _fetch(session, url, delay, jitter, timeout)
+        html_path: Optional[str] = None
+        if page_cache_dir:
+            os.makedirs(page_cache_dir, exist_ok=True)
+            parsed = urlparse(url)
+            components = [
+                part
+                for part in (
+                    parsed.netloc,
+                    parsed.path.strip("/") if parsed.path else "",
+                    parsed.query,
+                )
+                if part
+            ]
+            if not components:
+                components = [url]
+            filename_base = safe_filename("_".join(components))
+            if not filename_base:
+                filename_base = "page"
+            filename = f"{filename_base}.html"
+            html_path = _ensure_unique_path(page_cache_dir, filename)
+            with open(html_path, "w", encoding="utf-8") as handle:
+                handle.write(html)
         soup = BeautifulSoup(html, "html.parser")
-        yield url, soup
+        yield url, soup, html_path
         visited.add(url)
         for link in extract_pagination_links(url, soup, start_url):
             if link not in visited and link not in queue:
