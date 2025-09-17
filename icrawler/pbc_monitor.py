@@ -4,462 +4,82 @@ import argparse
 import json
 import os
 import random
-import re
 import time
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
 import requests
-from bs4 import BeautifulSoup, Tag, NavigableString
+from bs4 import BeautifulSoup
 
 from .crawler import safe_filename
-
-
-DEFAULT_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "zh-CN,zh;q=0.9",
-}
-
-PAGINATION_TEXT = {"下一页", "下页", "上一页", "末页", "尾页", "首页"}
-ATTACHMENT_SUFFIXES = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar")
-
-DOCUMENT_TYPE_MAP = {
-    ".pdf": "pdf",
-    ".doc": "word",
-    ".docx": "word",
-    ".xls": "excel",
-    ".xlsx": "excel",
-    ".zip": "archive",
-    ".rar": "archive",
-    ".htm": "html",
-    ".html": "html",
-    ".txt": "text",
-}
-
-
-def _sleep(delay: float, jitter: float) -> None:
-    if delay > 0 or jitter > 0:
-        time.sleep(delay + random.uniform(0, jitter))
-
-
-def _fetch(session: requests.Session, url: str, delay: float, jitter: float, timeout: float) -> str:
-    _sleep(delay, jitter)
-    response = session.get(url, timeout=timeout)
-    response.raise_for_status()
-    encoding = (response.encoding or "").lower()
-    if not encoding or encoding == "iso-8859-1":
-        response.encoding = response.apparent_encoding or "utf-8"
-    return response.text
-
-
-GENERIC_LINK_TEXT = {
-    "下载",
-    "查看",
-    "详情",
-    "点击查看",
-    "点击下载",
-    "附件",
-    "word",
-    "pdf",
-    "doc",
-    "docx",
-    "xls",
-    "xlsx",
-    "zip",
-    "rar",
-}
-GENERIC_LINK_TEXT_LOWER = {text.lower() for text in GENERIC_LINK_TEXT}
-_GENERIC_CLEAN_RE = re.compile(r"[\s：:（）()【】\[\]<>“”\"'·、，。；,.;!！?？]")
-_GENERIC_SUFFIXES = ("版", "本")
-_GENERIC_PATTERN = re.compile(
-    r"^(点击)?(查看|下载|附件)?(word|pdf|docx?|xls|xlsx)?(下载|查看)?$"
+from .fetcher import DEFAULT_HEADERS, get as http_get, sleep_with_jitter
+from .parser import (
+    extract_listing_entries as parser_extract_listing_entries,
+    extract_file_links as parser_extract_file_links,
+    extract_pagination_links as parser_extract_pagination_links,
+    extract_pagination_meta as parser_extract_pagination_meta,
+    classify_document_type,
+    snapshot_entries as parser_snapshot_entries,
+    snapshot_local_file as parser_snapshot_local_file,
 )
-
-_GENERIC_PHRASE_PATTERNS = [
-    re.compile(
-        r"下载\s*(?:word|pdf|docx?|xls|xlsx|zip|rar)\s*(?:版)?",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:word|pdf|docx?|xls|xlsx|zip|rar)\s*下载",
-        re.IGNORECASE,
-    ),
-    re.compile(r"附件\s*(?:下载|查看)", re.IGNORECASE),
-    re.compile(r"点击\s*(?:下载|查看)", re.IGNORECASE),
-]
-
-
-def _ancestor_preceding_text(tag: Tag, max_levels: int = 4) -> List[str]:
-    texts: List[str] = []
-    current: Optional[Tag] = tag
-    depth = 0
-    while current is not None and depth < max_levels:
-        parent = current.parent
-        if not isinstance(parent, Tag):
-            break
-        pieces: List[str] = []
-        for child in parent.children:
-            if child is current:
-                break
-            if isinstance(child, NavigableString):
-                text = str(child)
-            elif isinstance(child, Tag):
-                text = child.get_text(" ", strip=True)
-            else:
-                continue
-            text = re.sub(r"\s+", " ", text or "").strip()
-            if text:
-                pieces.append(text)
-        if pieces:
-            texts.append(" ".join(pieces))
-        current = parent
-        depth += 1
-        if parent.name in {"body", "html"}:
-            break
-    return texts
-
-
-def _attachment_name(tag: Tag, file_url: str) -> str:
-    candidates: List[str] = []
-    link_text = tag.get_text(" ", strip=True)
-    if link_text:
-        candidates.append(link_text)
-    title_attr = tag.get("title")
-    has_title = False
-    if title_attr:
-        candidates.insert(0, title_attr.strip())
-        has_title = True
-
-    # Inspect table structure: prefer text from preceding cells in the same row
-    cell = tag.find_parent(["td", "th"])
-    if cell and cell.parent and cell.parent.name == "tr":
-        cells = [c for c in cell.parent.find_all(["td", "th"]) if isinstance(c, Tag)]
-        try:
-            idx = cells.index(cell)
-        except ValueError:
-            idx = -1
-        if idx > 0:
-            for prev in reversed(cells[:idx]):
-                text = prev.get_text(" ", strip=True)
-                if text:
-                    candidates.insert(0, text)
-                    break
-
-    # Look for descriptive text directly before the link
-    preceding_parts: List[str] = []
-    for sibling in tag.previous_siblings:
-        text = ""
-        if isinstance(sibling, NavigableString):
-            text = str(sibling)
-        elif isinstance(sibling, Tag):
-            text = sibling.get_text(" ", strip=True)
-        text = re.sub(r"\s+", " ", text or "").strip()
-        if not text:
-            continue
-        preceding_parts.insert(0, text)
-        if len(" ".join(preceding_parts)) >= 120:
-            break
-    insertion_index = 1 if has_title else 0
-    if preceding_parts:
-        candidates.insert(insertion_index, " ".join(preceding_parts))
-        insertion_index += 1
-
-    for context_text in _ancestor_preceding_text(tag):
-        candidates.insert(insertion_index, context_text)
-        insertion_index += 1
-
-    container = tag.find_parent(["li", "p"])
-    if container:
-        container_text = container.get_text(" ", strip=True)
-        container_text = re.sub(r"\s+", " ", container_text)
-        if container_text:
-            candidates.append(container_text)
-
-    # Remove duplicates while preserving order
-    def _tidy(text: str) -> str:
-        text = re.sub(r"\s+", " ", text).strip()
-        for pattern in _GENERIC_PHRASE_PATTERNS:
-            text = pattern.sub(" ", text)
-        text = re.sub(r"\s+", " ", text).strip()
-        text = re.sub(r"([：:])\s+", r"\1", text)
-        for word in GENERIC_LINK_TEXT:
-            text = re.sub(rf"{re.escape(word)}$", "", text, flags=re.IGNORECASE).strip()
-        text = text.rstrip(":：-—··•·").strip()
-        if len(text) > 200:
-            text = text[:200].strip()
-        return text
-
-    def _is_generic(text: str) -> bool:
-        lowered = text.lower()
-        lowered = _GENERIC_CLEAN_RE.sub("", lowered)
-        for suffix in _GENERIC_SUFFIXES:
-            if lowered.endswith(suffix):
-                lowered = lowered[: -len(suffix)]
-        if not lowered:
-            return True
-        if lowered in GENERIC_LINK_TEXT_LOWER:
-            return True
-        return bool(_GENERIC_PATTERN.fullmatch(lowered))
-
-    seen: Set[str] = set()
-    ordered_candidates = []
-    generic_candidates = []
-    for candidate in candidates:
-        candidate = _tidy(candidate)
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if _is_generic(candidate):
-            generic_candidates.append(candidate)
-        else:
-            ordered_candidates.append(candidate)
-
-    if ordered_candidates:
-        return ordered_candidates[0]
-
-    if generic_candidates:
-        return generic_candidates[0]
-
-    parsed = urlparse(file_url)
-    filename = os.path.basename(parsed.path)
-    if filename:
-        return filename
-    return safe_filename(file_url)
-
-
-def _legacy_extract_file_links(
-    page_url: str,
-    soup: BeautifulSoup,
-    suffixes: Sequence[str] = ATTACHMENT_SUFFIXES,
-) -> List[Tuple[str, str]]:
-    links: List[Tuple[str, str]] = []
-    seen: Set[str] = set()
-    for tag in soup.find_all("a", href=True):
-        href = tag["href"].strip()
-        if not href:
-            continue
-        absolute = urljoin(page_url, href)
-        path = urlparse(absolute).path.lower()
-        if not any(path.endswith(suffix) for suffix in suffixes):
-            continue
-        if absolute in seen:
-            continue
-        seen.add(absolute)
-        links.append((absolute, _attachment_name(tag, absolute)))
-    return links
-
-
-def _parse_serial(text: str) -> Optional[int]:
-    if not text:
-        return None
-    cleaned = re.sub(r"[\s\u3000]+", "", text)
-    cleaned = cleaned.strip("．.、)")
-    cleaned = cleaned.strip("(")
-    if cleaned.isdigit():
-        try:
-            return int(cleaned)
-        except ValueError:
-            return None
-    return None
-
-
-def _extract_remark(cell: Tag, title_text: str) -> str:
-    text = cell.get_text(" ", strip=True)
-    if not text:
-        return ""
-    if title_text:
-        index = text.find(title_text)
-        if index != -1:
-            text = (text[:index] + text[index + len(title_text) :]).strip()
-    return text.strip()
-
-
-def _extract_structured_entries(
-    page_url: str,
-    soup: BeautifulSoup,
-    suffixes: Sequence[str],
-) -> List[Dict[str, object]]:
-    entries: List[Dict[str, object]] = []
-    for row in soup.find_all("tr"):
-        cells = [
-            cell
-            for cell in row.find_all(["td", "th"], recursive=False)
-            if isinstance(cell, Tag)
-        ]
-        if len(cells) < 2:
-            continue
-        serial = _parse_serial(cells[0].get_text(" ", strip=True))
-        if serial is None:
-            continue
-        link_cell = cells[1]
-        title_link = link_cell.find("a", href=True)
-        if not title_link:
-            continue
-        raw_href = title_link.get("href", "").strip()
-        if not raw_href:
-            continue
-        detail_url = urljoin(page_url, raw_href)
-        link_type = _classify_document_type(detail_url)
-        if link_type != "html":
-            continue
-        title = title_link.get_text(" ", strip=True)
-        remark = _extract_remark(link_cell, title)
-        extra_notes: List[str] = []
-        for extra_cell in cells[2:]:
-            cell_text = extra_cell.get_text(" ", strip=True)
-            for link in extra_cell.find_all("a", href=True):
-                link_text = link.get_text(" ", strip=True)
-                if link_text:
-                    cell_text = cell_text.replace(link_text, "", 1).strip()
-            if cell_text:
-                extra_notes.append(cell_text)
-        if extra_notes:
-            if remark:
-                remark = " ".join([remark] + extra_notes).strip()
-            else:
-                remark = " ".join(extra_notes).strip()
-
-        seen: Set[str] = set()
-        documents: List[Dict[str, object]] = []
-        documents.append({"type": "html", "url": detail_url, "title": title})
-        seen.add(detail_url)
-
-        for link in row.find_all("a", href=True):
-            href = link.get("href", "").strip()
-            if not href:
-                continue
-            absolute = urljoin(page_url, href)
-            if absolute in seen:
-                continue
-            doc_type = _classify_document_type(absolute)
-            path = urlparse(absolute).path.lower()
-            if doc_type == "other" and not any(path.endswith(suffix) for suffix in suffixes):
-                continue
-            label = _attachment_name(link, absolute)
-            if title:
-                base_label = label or ""
-                if isinstance(serial, int) and base_label.lstrip().startswith(str(serial)):
-                    label = title
-                elif base_label.count(title) >= 1 and len(base_label) > len(title) + 5:
-                    label = title
-            if not label and title:
-                label = title
-            documents.append(
-                {"type": doc_type, "url": absolute, "title": label}
-            )
-            seen.add(absolute)
-
-        if not documents:
-            continue
-        entries.append(
-            {
-                "serial": serial,
-                "title": title,
-                "remark": remark,
-                "documents": documents,
-            }
-        )
-    return entries
 
 
 def extract_listing_entries(
     page_url: str,
     soup: BeautifulSoup,
-    suffixes: Sequence[str] = ATTACHMENT_SUFFIXES,
+    suffixes: Optional[Sequence[str]] = None,
 ) -> List[Dict[str, object]]:
-    structured = _extract_structured_entries(page_url, soup, suffixes)
-    if structured:
-        return structured
-    fallback: List[Dict[str, object]] = []
-    for index, (file_url, display_name) in enumerate(
-        _legacy_extract_file_links(page_url, soup, suffixes), start=1
-    ):
-        doc_type = _classify_document_type(file_url)
-        fallback.append(
-            {
-                "serial": index,
-                "title": display_name,
-                "remark": "",
-                "documents": [
-                    {
-                        "type": doc_type,
-                        "url": file_url,
-                        "title": display_name,
-                    }
-                ],
-            }
-        )
-    return fallback
+    if suffixes is None:
+        return parser_extract_listing_entries(page_url, soup)
+    return parser_extract_listing_entries(page_url, soup, suffixes)
 
 
 def extract_file_links(
     page_url: str,
     soup: BeautifulSoup,
-    suffixes: Sequence[str] = ATTACHMENT_SUFFIXES,
+    suffixes: Optional[Sequence[str]] = None,
 ) -> List[Tuple[str, str]]:
-    entries = extract_listing_entries(page_url, soup, suffixes=suffixes)
-    flattened: List[Tuple[str, str]] = []
-    for entry in entries:
-        for document in entry.get("documents", []):
-            doc_type = document.get("type")
-            if doc_type == "html":
-                continue
-            url_value = document.get("url")
-            if not url_value:
-                continue
-            flattened.append((url_value, document.get("title", "")))
-    return flattened
-
-
-def _same_listing_dir(start_url: str, candidate: str) -> bool:
-    start_path = urlparse(start_url).path
-    candidate_path = urlparse(candidate).path
-    start_dir = os.path.dirname(start_path)
-    return candidate_path.startswith(start_dir)
-
-
-def _classify_document_type(url: str) -> str:
-    path = urlparse(url).path.lower()
-    _, ext = os.path.splitext(path)
-    if ext in DOCUMENT_TYPE_MAP:
-        return DOCUMENT_TYPE_MAP[ext]
-    if not ext:
-        return "html"
-    return "other"
-
-
-_PAGINATION_RE = re.compile(r"index(?:_\d+)?\.(?:s?html)")
+    if suffixes is None:
+        return parser_extract_file_links(page_url, soup)
+    return parser_extract_file_links(page_url, soup, suffixes)
 
 
 def extract_pagination_links(
-    current_url: str, soup: BeautifulSoup, start_url: str
+    current_url: str,
+    soup: BeautifulSoup,
+    start_url: str,
 ) -> List[str]:
-    links: List[str] = []
-    seen: Set[str] = set()
-    for tag in soup.find_all("a", href=True):
-        text = (tag.get_text() or "").strip()
-        href = tag["href"].strip()
-        if not href:
-            continue
-        resolved = urljoin(current_url, href)
-        if resolved in seen:
-            continue
-        parsed = urlparse(resolved)
-        start_parsed = urlparse(start_url)
-        if parsed.netloc and parsed.netloc != start_parsed.netloc:
-            continue
-        if not _same_listing_dir(start_url, resolved):
-            continue
-        if text in PAGINATION_TEXT or _PAGINATION_RE.search(parsed.path.lower()):
-            seen.add(resolved)
-            links.append(resolved)
-    return links
+    return parser_extract_pagination_links(current_url, soup, start_url)
+
+
+def snapshot_entries(html: str, base_url: str) -> Dict[str, object]:
+    return parser_snapshot_entries(html, base_url)
+
+
+def snapshot_local_file(path: str) -> Dict[str, object]:
+    return parser_snapshot_local_file(path)
+
+
+def _fetch(
+    session: requests.Session,
+    url: str,
+    delay: float,
+    jitter: float,
+    timeout: float,
+) -> str:
+    response = http_get(
+        url,
+        session=session,
+        delay=delay,
+        jitter=jitter,
+        timeout=timeout,
+    )
+    return response.text
+
+
+def _sleep(delay: float, jitter: float) -> None:
+    sleep_with_jitter(delay, jitter)
 
 
 def iterate_listing_pages(
@@ -482,7 +102,6 @@ def iterate_listing_pages(
         for link in extract_pagination_links(url, soup, start_url):
             if link not in visited and link not in queue:
                 queue.append(link)
-
 
 class PBCState:
     def __init__(self) -> None:
@@ -556,7 +175,7 @@ class PBCState:
                 continue
             doc_type = document.get("type")
             if not isinstance(doc_type, str) or not doc_type:
-                doc_type = _classify_document_type(url_value)
+                doc_type = classify_document_type(url_value)
             title = document.get("title")
             if not isinstance(title, str):
                 title = ""
@@ -762,7 +381,7 @@ class PBCState:
             entry_id = state.ensure_entry({"title": title, "remark": ""})
             document = {
                 "url": url_value,
-                "type": _classify_document_type(url_value),
+                "type": classify_document_type(url_value),
                 "title": title or url_value,
                 "downloaded": True,
             }
@@ -781,8 +400,21 @@ def load_state(state_file: Optional[str]) -> PBCState:
 def save_state(state_file: Optional[str], state: PBCState) -> None:
     if not state_file:
         return
+    os.makedirs(os.path.dirname(state_file), exist_ok=True)
     with open(state_file, "w", encoding="utf-8") as fh:
         json.dump(state.to_jsonable(), fh, ensure_ascii=False, indent=2)
+
+
+def load_config(path: Optional[str]) -> Dict[str, Any]:
+    if not path:
+        return {}
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    if not isinstance(data, dict):
+        raise ValueError("Configuration file must contain a JSON object")
+    return data
 
 
 def _ensure_unique_path(output_dir: str, filename: str) -> str:
@@ -826,9 +458,17 @@ def collect_new_files(
     jitter: float,
     timeout: float,
     state_file: Optional[str],
+    page_cache_dir: Optional[str],
 ) -> List[str]:
     downloaded: List[str] = []
-    for page_url, soup in iterate_listing_pages(session, start_url, delay, jitter, timeout):
+    for page_url, soup, _ in iterate_listing_pages(
+        session,
+        start_url,
+        delay,
+        jitter,
+        timeout,
+        page_cache_dir=page_cache_dir,
+    ):
         entries = extract_listing_entries(page_url, soup)
         for entry in entries:
             entry_id = state.ensure_entry(entry)
@@ -884,7 +524,7 @@ def collect_new_files(
                         entry_id,
                         file_url,
                         display_name or label,
-                        doc_type or _classify_document_type(file_url),
+                        doc_type or classify_document_type(file_url),
                         path,
                     )
                     save_state(state_file, state)
@@ -894,6 +534,77 @@ def collect_new_files(
     return downloaded
 
 
+def snapshot_listing(
+    start_url: str,
+    delay: float,
+    jitter: float,
+    timeout: float,
+    page_cache_dir: Optional[str] = None,
+) -> Dict[str, object]:
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+    state = PBCState()
+    pages: List[Dict[str, object]] = []
+    if page_cache_dir:
+        os.makedirs(page_cache_dir, exist_ok=True)
+    for page_url, soup, html_path in iterate_listing_pages(
+        session,
+        start_url,
+        delay,
+        jitter,
+        timeout,
+        page_cache_dir=page_cache_dir,
+    ):
+        entries = extract_listing_entries(page_url, soup)
+        pages.append(
+            {
+                "url": page_url,
+                "html_path": html_path,
+                "pagination": parser_extract_pagination_meta(page_url, soup, start_url),
+            }
+        )
+        for entry in entries:
+            entry_id = state.ensure_entry(entry)
+            documents = entry.get("documents")
+            if isinstance(documents, list):
+                state.merge_documents(entry_id, documents)
+    result = state.to_jsonable()
+    if pages:
+        result["pages"] = pages
+    return result
+
+
+def fetch_listing_html(
+    start_url: str,
+    delay: float,
+    jitter: float,
+    timeout: float,
+) -> str:
+    session = requests.Session()
+    session.headers.update(DEFAULT_HEADERS)
+    return _fetch(session, start_url, delay, jitter, timeout)
+
+
+def snapshot_local_file(path: str, base_url: Optional[str] = None) -> Dict[str, object]:
+    snapshot = parser_snapshot_local_file(path, base_url)
+    state = PBCState()
+    for entry in snapshot.get("entries", []):
+        entry_id = state.ensure_entry(entry)
+        documents = entry.get("documents")
+        if isinstance(documents, list):
+            state.merge_documents(entry_id, documents)
+    result = state.to_jsonable()
+    result["pages"] = [
+        {
+            "url": path,
+            "html_path": path,
+            "pagination": snapshot.get("pagination", {}),
+        }
+    ]
+    result["pagination"] = snapshot.get("pagination", {})
+    return result
+
+
 def monitor_once(
     start_url: str,
     output_dir: str,
@@ -901,10 +612,13 @@ def monitor_once(
     delay: float,
     jitter: float,
     timeout: float,
+    page_cache_dir: Optional[str],
 ) -> List[str]:
     session = requests.Session()
     session.headers.update(DEFAULT_HEADERS)
     state = load_state(state_file)
+    if page_cache_dir:
+        os.makedirs(page_cache_dir, exist_ok=True)
     new_files = collect_new_files(
         session,
         start_url,
@@ -914,6 +628,7 @@ def monitor_once(
         jitter,
         timeout,
         state_file,
+        page_cache_dir,
     )
     save_state(state_file, state)
     return new_files
@@ -936,12 +651,21 @@ def monitor_loop(
     timeout: float,
     min_hours: float,
     max_hours: float,
+    page_cache_dir: Optional[str],
 ) -> None:
     iteration = 0
     while True:
         iteration += 1
         print(f"[{datetime.now().isoformat(timespec='seconds')}] Iteration {iteration} start")
-        new_files = monitor_once(start_url, output_dir, state_file, delay, jitter, timeout)
+        new_files = monitor_once(
+            start_url,
+            output_dir,
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            page_cache_dir,
+        )
         if new_files:
             print(f"New files downloaded: {len(new_files)}")
         else:
@@ -951,44 +675,86 @@ def monitor_loop(
         time.sleep(sleep_seconds)
 
 
+def _resolve_setting(
+    cli_value: Optional[Any],
+    config: Dict[str, Any],
+    key: str,
+    fallback: Optional[Any] = None,
+) -> Optional[Any]:
+    if cli_value is not None:
+        return cli_value
+    if config and key in config:
+        return config[key]
+    return fallback
+
+
 def main(argv: Optional[Sequence[str]] = None) -> None:
     parser = argparse.ArgumentParser(description="Monitor PBC attachment updates")
-    parser.add_argument("output_dir", help="directory for downloaded files")
-    parser.add_argument("start_url", help="listing URL to monitor")
+    parser.add_argument("output_dir", nargs="?", help="directory for downloaded files")
+    parser.add_argument("start_url", nargs="?", help="listing URL to monitor")
+    parser.add_argument(
+        "--config",
+        default="pbc_config.json",
+        help="path to JSON config with default settings",
+    )
+    parser.add_argument(
+        "--artifact-dir",
+        default=None,
+        help="base directory for cached pages, snapshots, and state",
+    )
     parser.add_argument(
         "--state-file",
-        default="state.json",
+        default=None,
         help="path to JSON file tracking downloaded attachment URLs",
     )
     parser.add_argument(
         "--delay",
         type=float,
-        default=3.0,
+        default=None,
         help="base delay in seconds before each request",
     )
     parser.add_argument(
         "--jitter",
         type=float,
-        default=2.0,
+        default=None,
         help="additional random delay in seconds",
     )
     parser.add_argument(
         "--timeout",
         type=float,
-        default=30.0,
+        default=None,
         help="HTTP timeout in seconds",
     )
     parser.add_argument(
         "--min-hours",
         type=float,
-        default=20.0,
+        default=None,
         help="minimum hours between checks when running continuously",
     )
     parser.add_argument(
         "--max-hours",
         type=float,
-        default=32.0,
+        default=None,
         help="maximum hours between checks when running continuously",
+    )
+    parser.add_argument(
+        "--dump-structure",
+        nargs="?",
+        const="structure.json",
+        help="dump parsed listing structure to stdout or given file",
+    )
+    parser.add_argument(
+        "--dump-from-file",
+        metavar="HTML",
+        nargs="?",
+        const="page.html",
+        help="parse local HTML file and dump structure to stdout",
+    )
+    parser.add_argument(
+        "--fetch-page",
+        nargs="?",
+        const="page.html",
+        help="download start page HTML to stdout or given file",
     )
     parser.add_argument(
         "--run-once",
@@ -997,18 +763,96 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     args = parser.parse_args(argv)
 
+    config = load_config(args.config)
+
+    output_dir = _resolve_setting(args.output_dir, config, "output_dir")
+    start_url = _resolve_setting(args.start_url, config, "start_url")
+    artifact_dir = _resolve_setting(args.artifact_dir, config, "artifact_dir", "artifacts")
+    artifact_dir = os.path.abspath(str(artifact_dir))
+
+    def _normalize_output_path(value: Optional[str], subdir: str) -> Optional[str]:
+        if value is None:
+            return None
+        if value == "-":
+            return "-"
+        if os.path.isabs(value):
+            return value
+        return os.path.join(artifact_dir, subdir, value)
+
+    pages_dir = os.path.join(artifact_dir, "pages")
+
+    state_value = _resolve_setting(args.state_file, config, "state_file", "state.json")
+    state_file = _normalize_output_path(state_value, "state")
+    delay = float(_resolve_setting(args.delay, config, "delay", 3.0))
+    jitter = float(_resolve_setting(args.jitter, config, "jitter", 2.0))
+    timeout = float(_resolve_setting(args.timeout, config, "timeout", 30.0))
+    min_hours = float(_resolve_setting(args.min_hours, config, "min_hours", 20.0))
+    max_hours = float(_resolve_setting(args.max_hours, config, "max_hours", 32.0))
+    dump_value = _resolve_setting(args.dump_structure, config, "dump_structure")
+    dump_target = _normalize_output_path(dump_value, "structure")
+    fetch_value = _resolve_setting(args.fetch_page, config, "fetch_page")
+    fetch_target = _normalize_output_path(fetch_value, "pages") if fetch_value else None
+    dump_from_file_value = args.dump_from_file
+    dump_from_file = _normalize_output_path(dump_from_file_value, "pages") if dump_from_file_value else None
+
+    if not dump_from_file and start_url is None:
+        raise SystemExit("start_url must be provided via CLI or config")
+
+    if not fetch_target and not dump_target and not dump_from_file and output_dir is None:
+        raise SystemExit("output_dir must be provided via CLI or config")
+
+    if dump_from_file:
+        snapshot = snapshot_local_file(dump_from_file, start_url)
+        print(json.dumps(snapshot, ensure_ascii=False, indent=2))
+        return
+
+    if fetch_target:
+        html_content = fetch_listing_html(str(start_url), delay, jitter, timeout)
+        if fetch_target == "-":
+            print(html_content)
+        else:
+            os.makedirs(os.path.dirname(fetch_target), exist_ok=True)
+            with open(str(fetch_target), "w", encoding="utf-8") as handle:
+                handle.write(html_content)
+        return
+
+    if dump_target:
+        snapshot = snapshot_listing(
+            str(start_url),
+            delay,
+            jitter,
+            timeout,
+            page_cache_dir=pages_dir,
+        )
+        if dump_target == "-":
+            print(json.dumps(snapshot, ensure_ascii=False, indent=2))
+        else:
+            os.makedirs(os.path.dirname(dump_target), exist_ok=True)
+            with open(str(dump_target), "w", encoding="utf-8") as handle:
+                json.dump(snapshot, handle, ensure_ascii=False, indent=2)
+        return
+
     if args.run_once:
-        monitor_once(args.start_url, args.output_dir, args.state_file, args.delay, args.jitter, args.timeout)
+        monitor_once(
+            str(start_url),
+            str(output_dir),
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            pages_dir,
+        )
     else:
         monitor_loop(
-            args.start_url,
-            args.output_dir,
-            args.state_file,
-            args.delay,
-            args.jitter,
-            args.timeout,
-            args.min_hours,
-            args.max_hours,
+            str(start_url),
+            str(output_dir),
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            min_hours,
+            max_hours,
+            pages_dir,
         )
 
 

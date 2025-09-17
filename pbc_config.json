@@ -1,0 +1,9 @@
+{
+  "output_dir": "artifacts/downloads",
+  "start_url": "http://www.pbc.gov.cn/zhengwugongkai/4081330/4406346/4406348/index.html",
+  "state_file": "state/state.json",
+  "artifact_dir": "artifacts",
+  "delay": 3.0,
+  "jitter": 2.0,
+  "timeout": 30.0
+}

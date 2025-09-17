@@ -6,7 +6,10 @@ from typing import Iterable
 
 import requests
 from bs4 import BeautifulSoup
-import pdfkit
+try:
+    import pdfkit
+except ModuleNotFoundError:  # pragma: no cover - optional dependency guard
+    pdfkit = None
 
 
 def safe_filename(url: str) -> str:
@@ -26,6 +29,8 @@ def download_file(url: str, output_dir: str) -> str:
 
 def save_page_as_pdf(url: str, output_dir: str) -> str:
     """Save the page at *url* as a PDF in *output_dir*."""
+    if pdfkit is None:
+        raise RuntimeError("pdfkit is not installed; cannot render HTML to PDF")
     filename = os.path.join(output_dir, safe_filename(url) + ".pdf")
     pdfkit.from_url(url, filename)
     return filename

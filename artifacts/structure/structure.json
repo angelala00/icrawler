@@ -1,0 +1,5 @@
+{
+  "entries": [],
+  "pages": [],
+  "note": "运行 `python -m icrawler.pbc_monitor --dump-structure` 后会在此文件写入完整结构"
+}

@@ -15,6 +15,7 @@ pdfkit_stub = types.SimpleNamespace(from_url=lambda *a, **k: None)
 sys.modules.setdefault("pdfkit", pdfkit_stub)
 
 from icrawler import pbc_monitor
+from icrawler import parser as parser_module
 
 
 def _make_soup(html: str) -> BeautifulSoup:
@@ -95,6 +96,292 @@ def test_extract_file_links_prefers_title_attribute():
             "中国人民银行公告〔2024〕第2号关于货币政策工具的公告",
         )
     ]
+
+
+def test_extract_pagination_meta_from_onclick():
+    html = """
+    <div class="list_page">
+      <a tagname="[HOMEPAGE]">首页</a>
+      <a tagname="[PREVIOUSPAGE]">上一页</a>
+      <a onclick="queryArticleByCondition(this,'/list/index2.html')" tagname="/list/index2.html">下一页</a>
+      <a onclick="queryArticleByCondition(this,'/list/index4.html')" tagname="/list/index4.html">尾页</a>
+    </div>
+    """
+    soup = _make_soup(html)
+    meta = parser_module.extract_pagination_meta(
+        "http://example.com/list/index.html",
+        soup,
+        "http://example.com/list/index.html",
+    )
+    assert meta["next"] == "http://example.com/list/index2.html"
+    assert meta["last"] == "http://example.com/list/index4.html"
+    assert meta["prev"] is None
+
+
+def test_load_config_and_main(tmp_path):
+    config_path = os.path.join(tmp_path, "pbc_config.json")
+    output_dir = os.path.join(tmp_path, "downloads")
+    state_path = os.path.join(tmp_path, "state.json")
+    config_data = {
+        "output_dir": output_dir,
+        "start_url": "http://example.com/index.html",
+        "state_file": state_path,
+        "delay": 1.5,
+        "jitter": 0.5,
+        "timeout": 10,
+        "artifact_dir": os.path.join(tmp_path, "artifacts"),
+    }
+    with open(config_path, "w", encoding="utf-8") as handle:
+        json.dump(config_data, handle)
+
+    captured = {}
+    original_monitor_once = pbc_monitor.monitor_once
+    try:
+        def fake_monitor_once(start_url, out_dir, state_file, delay, jitter, timeout, page_cache_dir):
+            captured.update(
+                {
+                    "start_url": start_url,
+                    "output_dir": out_dir,
+                    "state_file": state_file,
+                    "delay": delay,
+                    "jitter": jitter,
+                    "timeout": timeout,
+                }
+            )
+            return []
+
+        pbc_monitor.monitor_once = fake_monitor_once
+        pbc_monitor.main(["--config", config_path, "--run-once"])
+    finally:
+        pbc_monitor.monitor_once = original_monitor_once
+
+    assert captured["start_url"] == "http://example.com/index.html"
+    assert captured["output_dir"] == output_dir
+    assert captured["state_file"] == state_path
+    assert captured["delay"] == 1.5
+    assert captured["jitter"] == 0.5
+    assert captured["timeout"] == 10.0
+
+
+def test_main_cli_overrides_config(tmp_path):
+    config_path = os.path.join(tmp_path, "pbc_config.json")
+    output_dir = os.path.join(tmp_path, "downloads")
+    state_path = os.path.join(tmp_path, "state.json")
+    config_data = {
+        "output_dir": output_dir,
+        "start_url": "http://example.com/index.html",
+        "state_file": state_path,
+        "delay": 1.5,
+        "artifact_dir": os.path.join(tmp_path, "artifacts"),
+    }
+    with open(config_path, "w", encoding="utf-8") as handle:
+        json.dump(config_data, handle)
+
+    captured = {}
+    original_monitor_once = pbc_monitor.monitor_once
+    try:
+        def fake_monitor_once(start_url, out_dir, state_file, delay, jitter, timeout, page_cache_dir):
+            captured.update(
+                {
+                    "start_url": start_url,
+                    "output_dir": out_dir,
+                    "state_file": state_file,
+                    "delay": delay,
+                    "jitter": jitter,
+                    "timeout": timeout,
+                }
+            )
+            return []
+
+        pbc_monitor.monitor_once = fake_monitor_once
+        override_out = os.path.join(tmp_path, "custom_out")
+        pbc_monitor.main(
+            [
+                "--config",
+                config_path,
+                "--run-once",
+                override_out,
+                "http://override.example/index.html",
+                "--delay",
+                "4.0",
+            ]
+        )
+    finally:
+        pbc_monitor.monitor_once = original_monitor_once
+
+    assert captured["output_dir"] == override_out
+    assert captured["start_url"] == "http://override.example/index.html"
+    assert captured["delay"] == 4.0
+
+
+def test_main_dump_structure(tmp_path):
+    config_path = os.path.join(tmp_path, "pbc_config.json")
+    sample_html = """
+    <table>
+      <tr>
+        <td>1</td>
+        <td><a href="detail1.html">公告一</a></td>
+        <td>
+          <a href="/files/a.doc">word</a>
+          <a href="/files/a.pdf">pdf</a>
+        </td>
+      </tr>
+    </table>
+    """
+    config_data = {
+        "output_dir": os.path.join(tmp_path, "downloads"),
+        "start_url": "http://example.com/list/index.html",
+        "state_file": os.path.join(tmp_path, "state.json"),
+        "artifact_dir": os.path.join(tmp_path, "artifacts"),
+    }
+    with open(config_path, "w", encoding="utf-8") as handle:
+        json.dump(config_data, handle)
+
+    original_iterate = pbc_monitor.iterate_listing_pages
+    original_session = getattr(pbc_monitor.requests, "Session", None)
+    try:
+        def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+            yield start_url, _make_soup(sample_html), None
+
+        pbc_monitor.requests.Session = lambda: types.SimpleNamespace(headers={}, close=lambda: None)
+        pbc_monitor.iterate_listing_pages = fake_iterate
+        structure_path = os.path.join(tmp_path, "structure.json")
+        pbc_monitor.main(["--config", config_path, "--dump-structure", structure_path])
+    finally:
+        pbc_monitor.iterate_listing_pages = original_iterate
+        if original_session is not None:
+            pbc_monitor.requests.Session = original_session
+        elif hasattr(pbc_monitor.requests, "Session"):
+            delattr(pbc_monitor.requests, "Session")
+
+    with open(structure_path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+
+    assert "entries" in data
+    assert len(data["entries"]) == 1
+    assert data.get("pages")
+    assert data["pages"][0].get("html_path") is None
+    assert data["pages"][0]["pagination"]["next"] is None
+    entry = data["entries"][0]
+    assert entry["serial"] == 1
+    assert entry["title"] == "公告一"
+    doc_titles = [doc["title"] for doc in entry["documents"]]
+    assert doc_titles.count("公告一") >= 2
+
+
+def test_main_fetch_page(tmp_path):
+    config_path = os.path.join(tmp_path, "pbc_config.json")
+    state_path = os.path.join(tmp_path, "state.json")
+    config_data = {
+        "output_dir": os.path.join(tmp_path, "downloads"),
+        "start_url": "http://example.com/list/index.html",
+        "state_file": state_path,
+        "artifact_dir": os.path.join(tmp_path, "artifacts"),
+    }
+    with open(config_path, "w", encoding="utf-8") as handle:
+        json.dump(config_data, handle)
+
+    original_fetch_html = pbc_monitor.fetch_listing_html
+    try:
+        pbc_monitor.fetch_listing_html = lambda *a, **k: "<html>content</html>"
+        html_path = os.path.join(tmp_path, "page.html")
+        pbc_monitor.main(["--config", config_path, "--fetch-page", html_path])
+    finally:
+        pbc_monitor.fetch_listing_html = original_fetch_html
+
+    with open(html_path, "r", encoding="utf-8") as handle:
+        assert handle.read() == "<html>content</html>"
+
+
+def test_main_fetch_page_default_filename(tmp_path):
+    config_path = os.path.join(tmp_path, "pbc_config.json")
+    config_data = {
+        "output_dir": os.path.join(tmp_path, "downloads"),
+        "start_url": "http://example.com/list/index.html",
+        "state_file": os.path.join(tmp_path, "state.json"),
+        "artifact_dir": os.path.join(tmp_path, "artifacts"),
+    }
+    with open(config_path, "w", encoding="utf-8") as handle:
+        json.dump(config_data, handle)
+
+    original_fetch_html = pbc_monitor.fetch_listing_html
+    cwd = os.getcwd()
+    try:
+        pbc_monitor.fetch_listing_html = lambda *a, **k: "<html>default</html>"
+        os.chdir(tmp_path)
+        pbc_monitor.main(["--config", config_path, "--fetch-page"])
+        default_html = os.path.join("artifacts", "pages", "page.html")
+        with open(default_html, "r", encoding="utf-8") as handle:
+            assert handle.read() == "<html>default</html>"
+    finally:
+        pbc_monitor.fetch_listing_html = original_fetch_html
+        os.chdir(cwd)
+
+
+def test_main_dump_from_file(tmp_path):
+    html_file = os.path.join(tmp_path, "page.html")
+    with open(html_file, "w", encoding="utf-8") as handle:
+        handle.write(
+            """
+            <table>
+              <tr>
+                <td>1</td>
+                <td>
+                  <div class="gz_tit2">这是备注内容</div>
+                  <a href="detail.html" title="中国人民银行公告甲">公告甲…</a>
+                </td>
+                <td><a href="/files/a.pdf">pdf</a></td>
+              </tr>
+            </table>
+            """
+        )
+
+    original_print = builtins.print
+    captured = []
+    try:
+        builtins.print = lambda *args, **kwargs: captured.append(args[0] if args else "")
+        pbc_monitor.main(["--dump-from-file", html_file])
+    finally:
+        builtins.print = original_print
+
+    assert captured
+    data = json.loads(captured[0])
+    assert len(data["entries"]) == 1
+    assert "pagination" in data
+    assert data.get("pages")
+    entry_title = data["entries"][0]["title"]
+    assert entry_title == "中国人民银行公告甲"
+    assert data["entries"][0]["remark"] == "这是备注内容"
+    docs = data["entries"][0]["documents"]
+    doc_urls = [doc["url"] for doc in docs]
+    assert any(url.endswith("a.pdf") for url in doc_urls)
+    pdf_docs = [doc for doc in docs if str(doc.get("url", "")).endswith("a.pdf")]
+    assert pdf_docs and pdf_docs[0]["title"] == "中国人民银行公告甲"
+
+
+def test_main_dump_from_file_default(tmp_path):
+    pages_dir = os.path.join(tmp_path, "artifacts", "pages")
+    os.makedirs(pages_dir, exist_ok=True)
+    html_file = os.path.join(pages_dir, "page.html")
+    with open(html_file, "w", encoding="utf-8") as handle:
+        handle.write("<html><body>test</body></html>")
+
+    original_print = builtins.print
+    captured = []
+    cwd = os.getcwd()
+    try:
+        builtins.print = lambda *args, **kwargs: captured.append(args[0] if args else "")
+        os.chdir(tmp_path)
+        pbc_monitor.main(["--dump-from-file"])
+    finally:
+        builtins.print = original_print
+        os.chdir(cwd)
+
+    assert captured
+    data = json.loads(captured[0])
+    assert "entries" in data
+    assert data.get("pages")
+    assert data["pages"][0]["html_path"].endswith(os.path.join("artifacts", "pages", "page.html"))
 
 
 def test_extract_file_links_nested_containers_clean_name():
@@ -323,8 +610,8 @@ def test_collect_new_files_saves_state_on_each_download():
     </body></html>
     """
 
-    def fake_iterate(session, start_url, delay, jitter, timeout):
-        yield start_url, _make_soup(html)
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+        yield start_url, _make_soup(html), None
 
     download_calls = []
 
@@ -370,6 +657,7 @@ def test_collect_new_files_saves_state_on_each_download():
                 jitter=0.0,
                 timeout=10.0,
                 state_file=state_path,
+                page_cache_dir=None,
             )
 
             assert downloaded == [os.path.join(tmpdir, "out", "file1.pdf")]
@@ -406,6 +694,7 @@ def test_collect_new_files_saves_state_on_each_download():
                 jitter=0.0,
                 timeout=10.0,
                 state_file=state_path,
+                page_cache_dir=None,
             )
             assert any("Skipping existing file" in msg for msg in skip_messages)
     finally:
@@ -422,8 +711,8 @@ def test_collect_new_files_updates_missing_name():
     </body></html>
     """
 
-    def fake_iterate(session, start_url, delay, jitter, timeout):
-        yield start_url, _make_soup(html)
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+        yield start_url, _make_soup(html), None
 
     original_iterate = pbc_monitor.iterate_listing_pages
     original_save = pbc_monitor.save_state
@@ -475,6 +764,7 @@ def test_collect_new_files_updates_missing_name():
                 jitter=0.0,
                 timeout=10.0,
                 state_file=state_path,
+                page_cache_dir=None,
             )
 
             assert state.files["http://example.com/file1.pdf"]["title"] == "文件一"
@@ -483,3 +773,54 @@ def test_collect_new_files_updates_missing_name():
         pbc_monitor.iterate_listing_pages = original_iterate
         pbc_monitor.save_state = original_save
         builtins.print = original_print
+
+
+def test_dump_structure_default_artifacts(tmp_path):
+    config_path = os.path.join(tmp_path, "pbc_config.json")
+    sample_html = """
+    <table>
+      <tr>
+        <td>1</td>
+        <td><a href="detail1.html">公告一</a></td>
+      </tr>
+    </table>
+    """
+    config_data = {
+        "output_dir": os.path.join(tmp_path, "downloads"),
+        "start_url": "http://example.com/list/index.html",
+        "state_file": os.path.join(tmp_path, "state.json"),
+    }
+    with open(config_path, "w", encoding="utf-8") as handle:
+        json.dump(config_data, handle)
+
+    original_iterate = pbc_monitor.iterate_listing_pages
+    original_session = getattr(pbc_monitor.requests, "Session", None)
+    cwd = os.getcwd()
+    try:
+        def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+            if page_cache_dir:
+                os.makedirs(page_cache_dir, exist_ok=True)
+                html_path = os.path.join(page_cache_dir, "page_001_index.html")
+            else:
+                html_path = os.path.join(tmp_path, "page_001_index.html")
+            with open(html_path, "w", encoding="utf-8") as f:
+                f.write(sample_html)
+            yield start_url, _make_soup(sample_html), html_path
+        pbc_monitor.iterate_listing_pages = fake_iterate
+        pbc_monitor.requests.Session = lambda: types.SimpleNamespace(headers={}, close=lambda: None)
+        os.chdir(tmp_path)
+        pbc_monitor.main(["--config", config_path, "--dump-structure"])
+    finally:
+        pbc_monitor.iterate_listing_pages = original_iterate
+        if original_session is not None:
+            pbc_monitor.requests.Session = original_session
+        elif hasattr(pbc_monitor.requests, "Session"):
+            delattr(pbc_monitor.requests, "Session")
+        os.chdir(cwd)
+
+    structure_path = os.path.join(tmp_path, "artifacts", "structure", "structure.json")
+    assert os.path.exists(structure_path)
+    with open(structure_path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+    assert data["pages"]
+    assert data["pages"][0]["html_path"].endswith("page_001_index.html")
