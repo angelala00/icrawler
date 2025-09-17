@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import argparse
 import json
 import os
@@ -66,6 +68,49 @@ _GENERIC_PATTERN = re.compile(
     r"^(点击)?(查看|下载|附件)?(word|pdf|docx?|xls|xlsx)?(下载|查看)?$"
 )
 
+_GENERIC_PHRASE_PATTERNS = [
+    re.compile(
+        r"下载\s*(?:word|pdf|docx?|xls|xlsx|zip|rar)\s*(?:版)?",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:word|pdf|docx?|xls|xlsx|zip|rar)\s*下载",
+        re.IGNORECASE,
+    ),
+    re.compile(r"附件\s*(?:下载|查看)", re.IGNORECASE),
+    re.compile(r"点击\s*(?:下载|查看)", re.IGNORECASE),
+]
+
+
+def _ancestor_preceding_text(tag: Tag, max_levels: int = 4) -> List[str]:
+    texts: List[str] = []
+    current: Optional[Tag] = tag
+    depth = 0
+    while current is not None and depth < max_levels:
+        parent = current.parent
+        if not isinstance(parent, Tag):
+            break
+        pieces: List[str] = []
+        for child in parent.children:
+            if child is current:
+                break
+            if isinstance(child, NavigableString):
+                text = str(child)
+            elif isinstance(child, Tag):
+                text = child.get_text(" ", strip=True)
+            else:
+                continue
+            text = re.sub(r"\s+", " ", text or "").strip()
+            if text:
+                pieces.append(text)
+        if pieces:
+            texts.append(" ".join(pieces))
+        current = parent
+        depth += 1
+        if parent.name in {"body", "html"}:
+            break
+    return texts
+
 
 def _attachment_name(tag: Tag, file_url: str) -> str:
     candidates: List[str] = []
@@ -107,9 +152,14 @@ def _attachment_name(tag: Tag, file_url: str) -> str:
         preceding_parts.insert(0, text)
         if len(" ".join(preceding_parts)) >= 120:
             break
+    insertion_index = 1 if has_title else 0
     if preceding_parts:
-        insertion_index = 1 if has_title else 0
         candidates.insert(insertion_index, " ".join(preceding_parts))
+        insertion_index += 1
+
+    for context_text in _ancestor_preceding_text(tag):
+        candidates.insert(insertion_index, context_text)
+        insertion_index += 1
 
     container = tag.find_parent(["li", "p"])
     if container:
@@ -121,10 +171,15 @@ def _attachment_name(tag: Tag, file_url: str) -> str:
     # Remove duplicates while preserving order
     def _tidy(text: str) -> str:
         text = re.sub(r"\s+", " ", text).strip()
+        for pattern in _GENERIC_PHRASE_PATTERNS:
+            text = pattern.sub(" ", text)
+        text = re.sub(r"\s+", " ", text).strip()
         text = re.sub(r"([：:])\s+", r"\1", text)
         for word in GENERIC_LINK_TEXT:
-            text = re.sub(rf"{re.escape(word)}$", "", text).strip()
-        text = text.rstrip(":：").strip()
+            text = re.sub(rf"{re.escape(word)}$", "", text, flags=re.IGNORECASE).strip()
+        text = text.rstrip(":：-—··•·").strip()
+        if len(text) > 200:
+            text = text[:200].strip()
         return text
 
     def _is_generic(text: str) -> bool:
