@@ -97,6 +97,30 @@ def test_extract_file_links_prefers_title_attribute():
     ]
 
 
+def test_extract_file_links_nested_containers_clean_name():
+    html = """
+    <div class="item">
+      <div class="title">中国人民银行公告〔2025〕第9号</div>
+      <div class="links">
+        <a href="/files/notice2025.docx">下载word版</a>
+        <a href="/files/notice2025.pdf">PDF下载</a>
+      </div>
+    </div>
+    """
+    soup = _make_soup(html)
+    links = pbc_monitor.extract_file_links("http://example.com/list/index.html", soup)
+    assert links == [
+        (
+            "http://example.com/files/notice2025.docx",
+            "中国人民银行公告〔2025〕第9号",
+        ),
+        (
+            "http://example.com/files/notice2025.pdf",
+            "中国人民银行公告〔2025〕第9号",
+        ),
+    ]
+
+
 def test_extract_pagination_links():
     html = """
     <html><body>
