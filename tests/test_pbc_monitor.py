@@ -181,6 +181,7 @@ def test_load_config_and_main(tmp_path):
             jitter,
             timeout,
             page_cache_dir,
+            allowed_types=None,
             verify_local=False,
         ):
             captured.update(
@@ -233,6 +234,7 @@ def test_main_cli_overrides_config(tmp_path):
             jitter,
             timeout,
             page_cache_dir,
+            allowed_types=None,
             verify_local=False,
         ):
             captured.update(
@@ -1102,6 +1104,76 @@ def test_collect_new_files_downloads_html_documents(tmp_path):
         pbc_monitor.download_document = original_download
 
 
+def test_collect_new_files_respects_allowed_types(tmp_path):
+    entries = [
+        {
+            "serial": 1,
+            "title": "公告A",
+            "remark": "",
+            "documents": [
+                {
+                    "url": "http://example.com/detail.html",
+                    "type": "html",
+                    "title": "详情",
+                },
+                {
+                    "url": "http://example.com/file.pdf",
+                    "type": "pdf",
+                    "title": "附件",
+                },
+            ],
+        }
+    ]
+
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+        yield start_url, _make_soup("<html></html>"), None
+
+    def fake_extract_listing_entries(page_url, soup):
+        return entries
+
+    download_calls = []
+
+    def fake_download_document(session, file_url, output_dir, delay, jitter, timeout, doc_type):
+        os.makedirs(output_dir, exist_ok=True)
+        target = os.path.join(output_dir, os.path.basename(file_url))
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write(doc_type or "")
+        download_calls.append((file_url, doc_type))
+        return target
+
+    original_iterate = pbc_monitor.iterate_listing_pages
+    original_extract = pbc_monitor.extract_listing_entries
+    original_download = pbc_monitor.download_document
+    try:
+        pbc_monitor.iterate_listing_pages = fake_iterate
+        pbc_monitor.extract_listing_entries = fake_extract_listing_entries
+        pbc_monitor.download_document = fake_download_document
+
+        state = pbc_monitor.PBCState()
+        output_dir = os.path.join(tmp_path, "out")
+        downloaded = pbc_monitor.collect_new_files(
+            session=None,
+            start_url="http://example.com/index.html",
+            output_dir=output_dir,
+            state=state,
+            delay=0.0,
+            jitter=0.0,
+            timeout=10.0,
+            state_file=None,
+            page_cache_dir=None,
+            allowed_types={"html"},
+        )
+
+        assert len(downloaded) == 1
+        assert download_calls == [("http://example.com/detail.html", "html")]
+        assert state.is_downloaded("http://example.com/detail.html")
+        assert not state.is_downloaded("http://example.com/file.pdf")
+    finally:
+        pbc_monitor.iterate_listing_pages = original_iterate
+        pbc_monitor.extract_listing_entries = original_extract
+        pbc_monitor.download_document = original_download
+
+
 def test_download_from_structure_skips_existing(tmp_path):
     structure_path = os.path.join(tmp_path, "structure.json")
     output_dir = os.path.join(tmp_path, "downloads")
@@ -1285,6 +1357,7 @@ def test_main_download_from_structure(tmp_path):
             delay,
             jitter,
             timeout,
+            allowed_types=None,
             verify_local=False,
         ):
             captured.update(
@@ -1295,6 +1368,7 @@ def test_main_download_from_structure(tmp_path):
                     "delay": delay,
                     "jitter": jitter,
                     "timeout": timeout,
+                    "allowed_types": allowed_types,
                     "verify_local": verify_local,
                 }
             )
@@ -1312,6 +1386,7 @@ def test_main_download_from_structure(tmp_path):
     assert captured["delay"] == 3.0
     assert captured["jitter"] == 2.0
     assert captured["timeout"] == 30.0
+    assert captured["allowed_types"] is None
     assert captured["verify_local"] is False
 
 
@@ -1343,6 +1418,7 @@ def test_main_download_from_structure_verify_local(tmp_path):
             delay,
             jitter,
             timeout,
+            allowed_types=None,
             verify_local=False,
         ):
             captured.update(
@@ -1353,6 +1429,7 @@ def test_main_download_from_structure_verify_local(tmp_path):
                     "delay": delay,
                     "jitter": jitter,
                     "timeout": timeout,
+                    "allowed_types": allowed_types,
                     "verify_local": verify_local,
                 }
             )
@@ -1364,4 +1441,5 @@ def test_main_download_from_structure_verify_local(tmp_path):
         pbc_monitor.download_from_structure = original_download_from_structure
 
     assert captured["structure_path"] == structure_path
+    assert captured["allowed_types"] is None
     assert captured["verify_local"] is True

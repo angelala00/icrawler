@@ -83,8 +83,29 @@ python -m icrawler.pbc_monitor --dump-from-file page.html
 
 ### 推荐工作流
 
-1. 准备配置文件（例如 `pbc_config.json`），写入 `start_url`、`output_dir`、`state_file`
-   等参数。
+1. 准备配置文件（例如 `pbc_config.json`）。现在支持多任务：
+   ```json
+   {
+     "artifact_dir": "artifacts",
+     "tasks": [
+       {
+         "name": "regulator_notice",
+         "start_url": ".../4406348/index.html",
+         "output_dir": "artifacts/downloads",
+         "state_file": "state/state.json"
+       },
+       {
+         "name": "policy_updates",
+         "start_url": ".../4693545/index.html",
+         "output_dir": "artifacts/downloads_policy",
+         "state_file": "state/policy_state.json",
+         "parser": "icrawler.parser_policy",
+         "download_types": ["html"]
+       }
+     ]
+   }
+   ```
+   仍然支持旧格式（单任务直接写顶层字段）。
 2. `--fetch-page` 抓取首页 HTML：
    `python -m icrawler.pbc_monitor --fetch-page page1.html`
    （若不带文件名将默认写入 `page.html`，传入 `-` 可输出到终端）
@@ -100,12 +121,11 @@ python -m icrawler.pbc_monitor --dump-from-file page.html
        该命令会在线遍历全部分页并把结构写入指定文件，其中 `pages`
        数组列出每页的分页信息。
     - `python -m icrawler.pbc_monitor --download-from-structure`：
-      默认读取 `artifacts/structure/structure.json` 并下载附件，避免再次遍历网页
-      （可在命令后指定其他结构文件）。命令会保存结构中的 HTML 详情页、WPS/Word
-      及 PDF 等文件。
+      默认读取任务对应的结构文件（多任务时会写入 `artifacts/structure/<任务名>/structure.json`）并下载附件，避免再次遍历网页。命令会保存结构中的 HTML 详情页、WPS/Word
+      及 PDF 等文件。指定 `--task policy_updates` 可只运行某个任务。
      - 或用 `python -m icrawler.pbc_monitor --run-once`：从配置的起始页面开始
        实时遍历分页并下载附件（同样包含 HTML 详情页），`state.json` 会记录已下载链接。
-    - 若担心本地文件被手动删除，可追加 `--verify-local`，执行时会检查
+     - 若担心本地文件被手动删除，可追加 `--verify-local`，执行时会检查
        `state.json` 中记录的路径是否仍然存在，缺失则重新下载。
     - 历史附件如需切换到新的路径式命名，可运行
       `python scripts/normalize_filenames.py` 自动重命名并更新 `state.json`。

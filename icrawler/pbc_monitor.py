@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import random
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -15,15 +18,25 @@ from bs4 import BeautifulSoup
 
 from .crawler import safe_filename
 from .fetcher import DEFAULT_HEADERS, get as http_get, sleep_with_jitter
-from .parser import (
-    extract_listing_entries as parser_extract_listing_entries,
-    extract_file_links as parser_extract_file_links,
-    extract_pagination_links as parser_extract_pagination_links,
-    extract_pagination_meta as parser_extract_pagination_meta,
-    classify_document_type,
-    snapshot_entries as parser_snapshot_entries,
-    snapshot_local_file as parser_snapshot_local_file,
-)
+from .parser import classify_document_type as _default_classify_document_type
+
+DEFAULT_PARSER_SPEC = "icrawler.parser"
+_current_parser_module: ModuleType = importlib.import_module(DEFAULT_PARSER_SPEC)
+
+
+def _load_parser_module(spec: Optional[str]) -> ModuleType:
+    if not spec:
+        return importlib.import_module(DEFAULT_PARSER_SPEC)
+    return importlib.import_module(spec)
+
+
+def _set_parser_module(module: ModuleType) -> None:
+    global _current_parser_module
+    _current_parser_module = module
+
+
+def _parser_call(name: str):
+    return getattr(_current_parser_module, name)
 
 
 def extract_listing_entries(
@@ -31,9 +44,10 @@ def extract_listing_entries(
     soup: BeautifulSoup,
     suffixes: Optional[Sequence[str]] = None,
 ) -> List[Dict[str, object]]:
+    func = _parser_call("extract_listing_entries")
     if suffixes is None:
-        return parser_extract_listing_entries(page_url, soup)
-    return parser_extract_listing_entries(page_url, soup, suffixes)
+        return func(page_url, soup)
+    return func(page_url, soup, suffixes)
 
 
 def extract_file_links(
@@ -41,9 +55,10 @@ def extract_file_links(
     soup: BeautifulSoup,
     suffixes: Optional[Sequence[str]] = None,
 ) -> List[Tuple[str, str]]:
+    func = _parser_call("extract_file_links")
     if suffixes is None:
-        return parser_extract_file_links(page_url, soup)
-    return parser_extract_file_links(page_url, soup, suffixes)
+        return func(page_url, soup)
+    return func(page_url, soup, suffixes)
 
 
 def extract_pagination_links(
@@ -51,15 +66,362 @@ def extract_pagination_links(
     soup: BeautifulSoup,
     start_url: str,
 ) -> List[str]:
-    return parser_extract_pagination_links(current_url, soup, start_url)
+    func = _parser_call("extract_pagination_links")
+    return func(current_url, soup, start_url)
 
 
 def snapshot_entries(html: str, base_url: str) -> Dict[str, object]:
-    return parser_snapshot_entries(html, base_url)
+    func = _parser_call("snapshot_entries")
+    return func(html, base_url)
 
 
 def snapshot_local_file(path: str) -> Dict[str, object]:
-    return parser_snapshot_local_file(path)
+    func = _parser_call("snapshot_local_file")
+    return func(path)
+
+
+def extract_pagination_meta(
+    page_url: str,
+    soup: BeautifulSoup,
+    start_url: str,
+) -> Dict[str, object]:
+    func = _parser_call("extract_pagination_meta")
+    return func(page_url, soup, start_url)
+
+
+def classify_document_type(url: str) -> str:
+    func = getattr(_current_parser_module, "classify_document_type", None)
+    if callable(func):
+        return func(url)
+    return _default_classify_document_type(url)
+
+
+@dataclass
+class TaskSpec:
+    name: str
+    start_url: str
+    output_dir: str
+    state_file: Optional[str]
+    parser_spec: Optional[str]
+    allowed_types: Optional[Set[str]]
+    verify_local: bool
+    raw_config: Dict[str, Any]
+    from_task_list: bool
+
+
+def _select_task_value(
+    cli_value: Optional[Any],
+    task_config: Optional[Dict[str, Any]],
+    global_config: Optional[Dict[str, Any]],
+    key: str,
+    default: Optional[Any] = None,
+) -> Optional[Any]:
+    if cli_value is not None:
+        return cli_value
+    if task_config and key in task_config:
+        return task_config[key]
+    if global_config and key in global_config:
+        return global_config[key]
+    return default
+
+
+def _normalize_download_types(value: Optional[Any]) -> Optional[Set[str]]:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = [value]
+    try:
+        return {str(item).lower() for item in value}
+    except TypeError:
+        return None
+
+
+def _build_tasks(
+    args: argparse.Namespace,
+    config: Dict[str, Any],
+    artifact_dir: str,
+) -> List[TaskSpec]:
+    tasks_config = config.get("tasks")
+
+    # If CLI positional overrides are provided, treat as single ad-hoc task.
+    if args.start_url or args.output_dir:
+        start_url = _select_task_value(args.start_url, None, config, "start_url")
+        if not start_url:
+            raise SystemExit("start_url must be provided via CLI or config")
+        output_dir = _select_task_value(args.output_dir, None, config, "output_dir")
+        parser_spec = _select_task_value(None, None, config, "parser")
+        download_types = _normalize_download_types(
+            _select_task_value(None, None, config, "download_types")
+        )
+        if args.verify_local:
+            verify_local = True
+        else:
+            verify_local = bool(config.get("verify_local", False))
+        state_file = _select_task_value(args.state_file, None, config, "state_file", "state.json")
+        name = args.task or "default"
+        return [
+            TaskSpec(
+                name=name,
+                start_url=str(start_url),
+                output_dir=str(output_dir) if output_dir else "",
+                state_file=state_file,
+                parser_spec=parser_spec,
+                allowed_types=download_types,
+                verify_local=verify_local,
+                raw_config={},
+                from_task_list=False,
+            )
+        ]
+
+    task_specs: List[TaskSpec] = []
+
+    if isinstance(tasks_config, list) and tasks_config:
+        for index, raw_task in enumerate(tasks_config):
+            if not isinstance(raw_task, dict):
+                continue
+            name = str(raw_task.get("name") or f"task{index + 1}")
+            if args.task and args.task != name:
+                continue
+            start_url = _select_task_value(None, raw_task, config, "start_url")
+            if not start_url:
+                raise SystemExit(f"start_url must be provided for task '{name}'")
+            output_dir = _select_task_value(None, raw_task, config, "output_dir")
+            parser_spec = _select_task_value(None, raw_task, config, "parser")
+            download_types = _normalize_download_types(
+                _select_task_value(None, raw_task, config, "download_types")
+            )
+            task_verify = raw_task.get("verify_local")
+            if args.verify_local:
+                verify_local = True
+            elif task_verify is not None:
+                verify_local = bool(task_verify)
+            else:
+                verify_local = bool(config.get("verify_local", False))
+            state_file = _select_task_value(None, raw_task, config, "state_file", "state.json")
+            task_specs.append(
+                TaskSpec(
+                    name=name,
+                    start_url=str(start_url),
+                    output_dir=str(output_dir) if output_dir else "",
+                    state_file=state_file,
+                    parser_spec=parser_spec,
+                    allowed_types=download_types,
+                    verify_local=verify_local,
+                    raw_config=raw_task,
+                    from_task_list=True,
+                )
+            )
+        if args.task and not task_specs:
+            raise SystemExit(f"Task '{args.task}' not found in configuration")
+        if task_specs:
+            return task_specs
+
+    # Fallback to single-task configuration.
+    start_url = _select_task_value(args.start_url, None, config, "start_url")
+    if not start_url:
+        raise SystemExit("start_url must be provided via CLI or config")
+    output_dir = _select_task_value(args.output_dir, None, config, "output_dir")
+    parser_spec = _select_task_value(None, None, config, "parser")
+    download_types = _normalize_download_types(config.get("download_types"))
+    if args.verify_local:
+        verify_local = True
+    else:
+        verify_local = bool(config.get("verify_local", False))
+    state_file = _select_task_value(args.state_file, None, config, "state_file", "state.json")
+    name = args.task or "default"
+    return [
+        TaskSpec(
+            name=name,
+            start_url=str(start_url),
+            output_dir=str(output_dir) if output_dir else "",
+            state_file=state_file,
+            parser_spec=parser_spec,
+            allowed_types=download_types,
+            verify_local=verify_local,
+            raw_config=config,
+            from_task_list=False,
+        )
+    ]
+
+
+def _run_task(
+    task: TaskSpec,
+    args: argparse.Namespace,
+    config: Dict[str, Any],
+    artifact_dir: str,
+) -> None:
+    if not task.start_url:
+        raise SystemExit(f"start_url must be provided for task '{task.name}'")
+
+    parser_module = _load_parser_module(task.parser_spec)
+    _set_parser_module(parser_module)
+
+    pages_base = os.path.join(artifact_dir, "pages")
+    if task.from_task_list:
+        pages_dir = os.path.join(pages_base, safe_filename(task.name))
+    else:
+        pages_dir = pages_base
+
+    state_value = task.state_file or "state.json"
+    state_file = _normalize_output_path(
+        str(state_value),
+        artifact_dir,
+        "state",
+        task.name if task.from_task_list else None,
+    )
+
+    dump_value = _select_task_value(
+        args.dump_structure,
+        task.raw_config,
+        config,
+        "dump_structure",
+    )
+    dump_target = _normalize_output_path(
+        dump_value,
+        artifact_dir,
+        "structure",
+        task.name if task.from_task_list else None,
+    ) if dump_value else None
+
+    download_value = _select_task_value(
+        args.download_from_structure,
+        task.raw_config,
+        config,
+        "download_from_structure",
+    )
+    download_target = _normalize_output_path(
+        download_value,
+        artifact_dir,
+        "structure",
+        task.name if task.from_task_list else None,
+    ) if download_value else None
+
+    fetch_value = _select_task_value(
+        args.fetch_page,
+        task.raw_config,
+        config,
+        "fetch_page",
+    )
+    fetch_target = _normalize_output_path(
+        fetch_value,
+        artifact_dir,
+        "pages",
+        task.name if task.from_task_list else None,
+    ) if fetch_value else None
+
+    dump_from_file_value = _select_task_value(
+        args.dump_from_file,
+        task.raw_config,
+        config,
+        "dump_from_file",
+    )
+    dump_from_file = _normalize_output_path(
+        dump_from_file_value,
+        artifact_dir,
+        "pages",
+        task.name if task.from_task_list else None,
+    ) if dump_from_file_value else None
+
+    start_url = str(task.start_url)
+    output_dir = str(task.output_dir) if task.output_dir else None
+
+    delay = float(_select_task_value(args.delay, task.raw_config, config, "delay", 3.0))
+    jitter = float(_select_task_value(args.jitter, task.raw_config, config, "jitter", 2.0))
+    timeout = float(_select_task_value(args.timeout, task.raw_config, config, "timeout", 30.0))
+    min_hours = float(_select_task_value(args.min_hours, task.raw_config, config, "min_hours", 20.0))
+    max_hours = float(_select_task_value(args.max_hours, task.raw_config, config, "max_hours", 32.0))
+
+    allowed_types = task.allowed_types
+    verify_local = task.verify_local
+
+    if not dump_from_file and not download_target and start_url is None:
+        raise SystemExit(f"start_url must be provided for task '{task.name}'")
+
+    if (
+        not fetch_target
+        and not dump_target
+        and not dump_from_file
+        and not download_target
+        and output_dir is None
+    ):
+        raise SystemExit(f"output_dir must be provided for task '{task.name}'")
+
+    if dump_from_file:
+        snapshot = snapshot_local_file(dump_from_file, start_url)
+        print(json.dumps(snapshot, ensure_ascii=False, indent=2))
+        return
+
+    if fetch_target:
+        html_content = fetch_listing_html(str(start_url), delay, jitter, timeout)
+        if fetch_target == "-":
+            print(html_content)
+        else:
+            os.makedirs(os.path.dirname(fetch_target), exist_ok=True)
+            with open(str(fetch_target), "w", encoding="utf-8") as handle:
+                handle.write(html_content)
+        return
+
+    if dump_target:
+        snapshot = snapshot_listing(
+            str(start_url),
+            delay,
+            jitter,
+            timeout,
+            page_cache_dir=pages_dir,
+        )
+        if dump_target == "-":
+            print(json.dumps(snapshot, ensure_ascii=False, indent=2))
+        else:
+            os.makedirs(os.path.dirname(dump_target), exist_ok=True)
+            with open(str(dump_target), "w", encoding="utf-8") as handle:
+                json.dump(snapshot, handle, ensure_ascii=False, indent=2)
+        return
+
+    if download_target:
+        if download_target == "-":
+            raise SystemExit("--download-from-structure does not support '-' as input")
+        if not os.path.exists(download_target):
+            raise SystemExit(f"Structure file not found: {download_target}")
+        if output_dir is None:
+            raise SystemExit("output_dir must be provided to download attachments")
+        download_from_structure(
+            download_target,
+            str(output_dir),
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            allowed_types,
+            verify_local,
+        )
+        return
+
+    if args.run_once:
+        monitor_once(
+            str(start_url),
+            str(output_dir),
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            pages_dir,
+            allowed_types,
+            verify_local,
+        )
+    else:
+        monitor_loop(
+            str(start_url),
+            str(output_dir),
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            min_hours,
+            max_hours,
+            pages_dir,
+            allowed_types,
+            verify_local,
+        )
 
 
 def _fetch(
@@ -486,6 +848,30 @@ def _ensure_canonical_local_path(
     return True
 
 
+def _normalize_output_path(
+    value: Optional[str],
+    artifact_dir: str,
+    subdir: str,
+    task_name: Optional[str] = None,
+) -> Optional[str]:
+    if value is None:
+        return None
+    if value == "-":
+        return "-"
+    if os.path.isabs(value):
+        return value
+    has_separator = os.sep in value or (os.altsep is not None and os.altsep in value)
+    parts = [artifact_dir]
+    if has_separator:
+        parts.append(value)
+    else:
+        parts.append(subdir)
+        if task_name:
+            parts.append(task_name)
+        parts.append(value)
+    return os.path.join(*parts)
+
+
 def load_config(path: Optional[str]) -> Dict[str, Any]:
     if not path:
         return {}
@@ -630,6 +1016,7 @@ def collect_new_files(
     timeout: float,
     state_file: Optional[str],
     page_cache_dir: Optional[str],
+    allowed_types: Optional[Set[str]] = None,
     verify_local: bool = False,
 ) -> List[str]:
     downloaded: List[str] = []
@@ -657,6 +1044,9 @@ def collect_new_files(
                 doc_type = document.get("type")
                 if not isinstance(file_url, str) or not file_url:
                     continue
+                normalized_type = (doc_type or classify_document_type(file_url)).lower()
+                if allowed_types and normalized_type not in allowed_types:
+                    continue
                 file_record = state.files.get(file_url, {})
                 existing_title = ""
                 already_downloaded = state.is_downloaded(file_url)
@@ -682,7 +1072,7 @@ def collect_new_files(
                         file_record,
                         doc_record,
                         file_url,
-                        doc_type or classify_document_type(file_url),
+                        normalized_type,
                     )
                     if not canonical_ok:
                         state.clear_downloaded(file_url)
@@ -707,7 +1097,7 @@ def collect_new_files(
                         delay,
                         jitter,
                         timeout,
-                        doc_type,
+                        normalized_type,
                     )
                     downloaded.append(path)
                     label = display_name or stored_entry.get("title") or file_url
@@ -715,7 +1105,7 @@ def collect_new_files(
                         entry_id,
                         file_url,
                         display_name or label,
-                        (doc_type or classify_document_type(file_url)),
+                        normalized_type,
                         path,
                     )
                     save_state(state_file, state)
@@ -732,6 +1122,7 @@ def download_from_structure(
     delay: float,
     jitter: float,
     timeout: float,
+    allowed_types: Optional[Set[str]] = None,
     verify_local: bool = False,
 ) -> List[str]:
     with open(structure_path, "r", encoding="utf-8") as handle:
@@ -760,6 +1151,9 @@ def download_from_structure(
             doc_type = document.get("type")
             if not isinstance(file_url, str) or not file_url:
                 continue
+            normalized_type = (doc_type or classify_document_type(file_url)).lower()
+            if allowed_types and normalized_type not in allowed_types:
+                continue
             file_record = state.files.get(file_url, {})
             existing_title = ""
             already_downloaded = state.is_downloaded(file_url)
@@ -785,7 +1179,7 @@ def download_from_structure(
                     file_record,
                     doc_record,
                     file_url,
-                    doc_type or classify_document_type(file_url),
+                    normalized_type,
                 )
                 if not canonical_ok:
                     state.clear_downloaded(file_url)
@@ -808,7 +1202,7 @@ def download_from_structure(
                     delay,
                     jitter,
                     timeout,
-                    doc_type,
+                    normalized_type,
                 )
                 downloaded.append(path)
                 label = display_name or stored_entry.get("title") or file_url
@@ -816,7 +1210,7 @@ def download_from_structure(
                     entry_id,
                     file_url,
                     display_name or label,
-                    (doc_type or classify_document_type(file_url)),
+                    normalized_type,
                     path,
                 )
                 save_state(state_file, state)
@@ -853,7 +1247,7 @@ def snapshot_listing(
             {
                 "url": page_url,
                 "html_path": html_path,
-                "pagination": parser_extract_pagination_meta(page_url, soup, start_url),
+                "pagination": extract_pagination_meta(page_url, soup, start_url),
             }
         )
         for entry in entries:
@@ -906,6 +1300,7 @@ def monitor_once(
     jitter: float,
     timeout: float,
     page_cache_dir: Optional[str],
+    allowed_types: Optional[Set[str]] = None,
     verify_local: bool = False,
 ) -> List[str]:
     session = requests.Session()
@@ -923,6 +1318,7 @@ def monitor_once(
         timeout,
         state_file,
         page_cache_dir,
+        allowed_types,
         verify_local,
     )
     save_state(state_file, state)
@@ -947,6 +1343,7 @@ def monitor_loop(
     min_hours: float,
     max_hours: float,
     page_cache_dir: Optional[str],
+    allowed_types: Optional[Set[str]] = None,
     verify_local: bool = False,
 ) -> None:
     iteration = 0
@@ -961,6 +1358,7 @@ def monitor_loop(
             jitter,
             timeout,
             page_cache_dir,
+            allowed_types,
             verify_local,
         )
         if new_files:
@@ -1060,6 +1458,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         help="download start page HTML to stdout or given file",
     )
     parser.add_argument(
+        "--task",
+        default=None,
+        help="name of task to run when multiple are configured",
+    )
+    parser.add_argument(
         "--run-once",
         action="store_true",
         help="perform a single check instead of looping",
@@ -1072,133 +1475,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
+    artifact_dir_value = _resolve_setting(args.artifact_dir, config, "artifact_dir", "artifacts")
+    artifact_dir = os.path.abspath(str(artifact_dir_value))
 
-    output_dir = _resolve_setting(args.output_dir, config, "output_dir")
-    start_url = _resolve_setting(args.start_url, config, "start_url")
-    artifact_dir = _resolve_setting(args.artifact_dir, config, "artifact_dir", "artifacts")
-    artifact_dir = os.path.abspath(str(artifact_dir))
+    tasks = _build_tasks(args, config, artifact_dir)
+    if not tasks:
+        raise SystemExit("No tasks configured")
 
-    def _normalize_output_path(value: Optional[str], subdir: str) -> Optional[str]:
-        if value is None:
-            return None
-        if value == "-":
-            return "-"
-        if os.path.isabs(value):
-            return value
-        return os.path.join(artifact_dir, subdir, value)
-
-    pages_dir = os.path.join(artifact_dir, "pages")
-
-    state_value = _resolve_setting(args.state_file, config, "state_file", "state.json")
-    state_file = _normalize_output_path(state_value, "state")
-    delay = float(_resolve_setting(args.delay, config, "delay", 3.0))
-    jitter = float(_resolve_setting(args.jitter, config, "jitter", 2.0))
-    timeout = float(_resolve_setting(args.timeout, config, "timeout", 30.0))
-    min_hours = float(_resolve_setting(args.min_hours, config, "min_hours", 20.0))
-    max_hours = float(_resolve_setting(args.max_hours, config, "max_hours", 32.0))
-    dump_value = _resolve_setting(args.dump_structure, config, "dump_structure")
-    dump_target = _normalize_output_path(dump_value, "structure")
-    verify_local_value = _resolve_setting(args.verify_local, config, "verify_local", False)
-    if isinstance(verify_local_value, str):
-        verify_local = verify_local_value.lower() in {"1", "true", "yes", "on"}
-    else:
-        verify_local = bool(verify_local_value)
-    download_value = _resolve_setting(
-        args.download_from_structure, config, "download_from_structure"
-    )
-    download_target = (
-        _normalize_output_path(download_value, "structure") if download_value else None
-    )
-    fetch_value = _resolve_setting(args.fetch_page, config, "fetch_page")
-    fetch_target = _normalize_output_path(fetch_value, "pages") if fetch_value else None
-    dump_from_file_value = args.dump_from_file
-    dump_from_file = _normalize_output_path(dump_from_file_value, "pages") if dump_from_file_value else None
-
-    if not dump_from_file and not download_target and start_url is None:
-        raise SystemExit("start_url must be provided via CLI or config")
-
-    if (
-        not fetch_target
-        and not dump_target
-        and not dump_from_file
-        and not download_target
-        and output_dir is None
-    ):
-        raise SystemExit("output_dir must be provided via CLI or config")
-
-    if dump_from_file:
-        snapshot = snapshot_local_file(dump_from_file, start_url)
-        print(json.dumps(snapshot, ensure_ascii=False, indent=2))
-        return
-
-    if fetch_target:
-        html_content = fetch_listing_html(str(start_url), delay, jitter, timeout)
-        if fetch_target == "-":
-            print(html_content)
-        else:
-            os.makedirs(os.path.dirname(fetch_target), exist_ok=True)
-            with open(str(fetch_target), "w", encoding="utf-8") as handle:
-                handle.write(html_content)
-        return
-
-    if dump_target:
-        snapshot = snapshot_listing(
-            str(start_url),
-            delay,
-            jitter,
-            timeout,
-            page_cache_dir=pages_dir,
-        )
-        if dump_target == "-":
-            print(json.dumps(snapshot, ensure_ascii=False, indent=2))
-        else:
-            os.makedirs(os.path.dirname(dump_target), exist_ok=True)
-            with open(str(dump_target), "w", encoding="utf-8") as handle:
-                json.dump(snapshot, handle, ensure_ascii=False, indent=2)
-        return
-
-    if download_target:
-        if download_target == "-":
-            raise SystemExit("--download-from-structure does not support '-' as input")
-        if not os.path.exists(download_target):
-            raise SystemExit(f"Structure file not found: {download_target}")
-        if output_dir is None:
-            raise SystemExit("output_dir must be provided to download attachments")
-        download_from_structure(
-            download_target,
-            str(output_dir),
-            state_file,
-            delay,
-            jitter,
-            timeout,
-            verify_local,
-        )
-        return
-
-    if args.run_once:
-        monitor_once(
-            str(start_url),
-            str(output_dir),
-            state_file,
-            delay,
-            jitter,
-            timeout,
-            pages_dir,
-            verify_local,
-        )
-    else:
-        monitor_loop(
-            str(start_url),
-            str(output_dir),
-            state_file,
-            delay,
-            jitter,
-            timeout,
-            min_hours,
-            max_hours,
-            pages_dir,
-            verify_local,
-        )
+    for task in tasks:
+        _run_task(task, args, config, artifact_dir)
 
 
 if __name__ == "__main__":
