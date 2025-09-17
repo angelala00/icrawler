@@ -121,6 +121,53 @@ def test_extract_file_links_nested_containers_clean_name():
     ]
 
 
+def test_extract_listing_entries_table_with_serials():
+    html = """
+    <table>
+      <tr>
+        <th>序号</th><th>标题</th><th>备注</th><th>下载</th>
+      </tr>
+      <tr>
+        <td>1</td>
+        <td><a href="detail1.html">公告甲</a> (2021年9月30日公布)</td>
+        <td>自2022年1月1日起施行</td>
+        <td>
+          <a href="docs/notice1.doc">word版</a>
+          <a href="docs/notice1.pdf">pdf版</a>
+        </td>
+      </tr>
+    </table>
+    """
+    soup = _make_soup(html)
+    entries = pbc_monitor.extract_listing_entries(
+        "http://example.com/list/index.html", soup
+    )
+    assert entries == [
+        {
+            "serial": 1,
+            "title": "公告甲",
+            "remark": "(2021年9月30日公布) 自2022年1月1日起施行",
+            "documents": [
+                {
+                    "type": "html",
+                    "url": "http://example.com/list/detail1.html",
+                    "title": "公告甲",
+                },
+                {
+                    "type": "word",
+                    "url": "http://example.com/list/docs/notice1.doc",
+                    "title": "公告甲",
+                },
+                {
+                    "type": "pdf",
+                    "url": "http://example.com/list/docs/notice1.pdf",
+                    "title": "公告甲",
+                },
+            ],
+        }
+    ]
+
+
 def test_extract_pagination_links():
     html = """
     <html><body>
@@ -143,19 +190,82 @@ def test_extract_pagination_links():
 def test_state_roundtrip():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_path = os.path.join(tmpdir, "pbc_state.json")
-        entries = {
-            "http://example.com/a.pdf": "公告A",
-            "http://example.com/b.pdf": "",
-        }
-        pbc_monitor.save_state(state_path, entries)
+        state = pbc_monitor.PBCState()
+        entry_a = state.ensure_entry({"serial": 1, "title": "公告A", "remark": ""})
+        state.merge_documents(
+            entry_a,
+            [
+                {
+                    "url": "http://example.com/a.pdf",
+                    "type": "pdf",
+                    "title": "公告A",
+                }
+            ],
+        )
+        state.mark_downloaded(
+            entry_a,
+            "http://example.com/a.pdf",
+            "公告A",
+            "pdf",
+            "downloads/a.pdf",
+        )
+        entry_b = state.ensure_entry({"serial": 2, "title": "公告B", "remark": "备注"})
+        state.merge_documents(
+            entry_b,
+            [
+                {
+                    "url": "http://example.com/b.pdf",
+                    "type": "pdf",
+                    "title": "公告B",
+                }
+            ],
+        )
+        state.mark_downloaded(
+            entry_b,
+            "http://example.com/b.pdf",
+            "公告B",
+            "pdf",
+            None,
+        )
+        pbc_monitor.save_state(state_path, state)
         with open(state_path, "r", encoding="utf-8") as handle:
             stored = json.load(handle)
-        assert stored == [
-            {"url": "http://example.com/a.pdf", "name": "公告A"},
-            {"url": "http://example.com/b.pdf", "name": ""},
-        ]
+        assert stored == {
+            "entries": [
+                {
+                    "serial": 1,
+                    "title": "公告A",
+                    "remark": "",
+                    "documents": [
+                        {
+                            "type": "pdf",
+                            "url": "http://example.com/a.pdf",
+                            "title": "公告A",
+                            "downloaded": True,
+                            "local_path": "downloads/a.pdf",
+                        }
+                    ],
+                },
+                {
+                    "serial": 2,
+                    "title": "公告B",
+                    "remark": "备注",
+                    "documents": [
+                        {
+                            "type": "pdf",
+                            "url": "http://example.com/b.pdf",
+                            "title": "公告B",
+                            "downloaded": True,
+                        }
+                    ],
+                },
+            ]
+        }
         loaded = pbc_monitor.load_state(state_path)
-        assert loaded == entries
+        assert loaded.is_downloaded("http://example.com/a.pdf")
+        assert loaded.is_downloaded("http://example.com/b.pdf")
+        assert loaded.files["http://example.com/a.pdf"]["title"] == "公告A"
+        assert loaded.to_jsonable() == stored
 
 
 def test_load_state_from_legacy_list():
@@ -165,10 +275,16 @@ def test_load_state_from_legacy_list():
         with open(state_path, "w", encoding="utf-8") as handle:
             json.dump(legacy, handle)
         loaded = pbc_monitor.load_state(state_path)
-        assert loaded == {
-            "http://example.com/a.pdf": "",
-            "http://example.com/b.pdf": "",
+        assert loaded.is_downloaded("http://example.com/a.pdf")
+        assert loaded.is_downloaded("http://example.com/b.pdf")
+        jsonable = loaded.to_jsonable()
+        found_urls = {
+            doc.get("url")
+            for entry in jsonable["entries"]
+            for doc in entry.get("documents", [])
         }
+        assert "http://example.com/a.pdf" in found_urls
+        assert "http://example.com/b.pdf" in found_urls
 
 
 def test_fetch_uses_apparent_encoding_for_iso8859():
@@ -232,9 +348,9 @@ def test_collect_new_files_saves_state_on_each_download():
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "state.json")
 
-            def wrapped_save_state(path, urls):
-                save_calls.append((path, sorted(urls)))
-                original_save(path, urls)
+            def wrapped_save_state(path, state_obj):
+                save_calls.append((path, state_obj.to_jsonable()))
+                original_save(path, state_obj)
 
             pbc_monitor.save_state = wrapped_save_state
 
@@ -244,12 +360,12 @@ def test_collect_new_files_saves_state_on_each_download():
 
             builtins.print = fake_print
 
-            known = {}
+            state = pbc_monitor.PBCState()
             downloaded = pbc_monitor.collect_new_files(
                 session=None,
                 start_url="http://example.com/index.html",
                 output_dir=os.path.join(tmpdir, "out"),
-                known_entries=known,
+                state=state,
                 delay=0.0,
                 jitter=0.0,
                 timeout=10.0,
@@ -264,23 +380,28 @@ def test_collect_new_files_saves_state_on_each_download():
             assert save_calls
             first_call = save_calls[0]
             assert first_call[0] == state_path
-            assert first_call[1] == [
-                "http://example.com/file1.pdf",
-            ]
+            saved_urls = {
+                doc["url"]
+                for entry in first_call[1]["entries"]
+                for doc in entry["documents"]
+                if doc.get("downloaded")
+            }
+            assert saved_urls == {"http://example.com/file1.pdf"}
 
+            pbc_monitor.save_state(state_path, state)
+            jsonable = state.to_jsonable()
+            assert save_calls[-1][1] == jsonable
             with open(state_path, "r", encoding="utf-8") as handle:
                 data = json.load(handle)
-            assert data == [
-                {"url": "http://example.com/file1.pdf", "name": "文件一"}
-            ]
-            assert known["http://example.com/file1.pdf"] == "文件一"
+            assert data == jsonable
+            assert state.is_downloaded("http://example.com/file1.pdf")
 
             skip_messages.clear()
             pbc_monitor.collect_new_files(
                 session=None,
                 start_url="http://example.com/index.html",
                 output_dir=os.path.join(tmpdir, "out"),
-                known_entries=known,
+                state=state,
                 delay=0.0,
                 jitter=0.0,
                 timeout=10.0,
@@ -311,15 +432,35 @@ def test_collect_new_files_updates_missing_name():
 
     try:
         pbc_monitor.iterate_listing_pages = fake_iterate
-        def fake_save(path, urls):
-            messages.append((path, dict(urls)))
-            return original_save(path, urls)
+        def fake_save(path, state_obj):
+            messages.append((path, state_obj.to_jsonable()))
+            return original_save(path, state_obj)
 
         pbc_monitor.save_state = fake_save
 
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "state.json")
-            known = {"http://example.com/file1.pdf": ""}
+            state = pbc_monitor.PBCState()
+            entry_id = state.ensure_entry({"serial": 1, "title": "", "remark": ""})
+            state.merge_documents(
+                entry_id,
+                [
+                    {
+                        "url": "http://example.com/file1.pdf",
+                        "type": "pdf",
+                        "title": "",
+                        "downloaded": True,
+                    }
+                ],
+            )
+            state.mark_downloaded(
+                entry_id,
+                "http://example.com/file1.pdf",
+                "",
+                "pdf",
+                None,
+            )
+
             def capture_print(*args, **kwargs):
                 messages.append(" ".join(str(a) for a in args))
 
@@ -329,14 +470,14 @@ def test_collect_new_files_updates_missing_name():
                 session=None,
                 start_url="http://example.com/index.html",
                 output_dir=os.path.join(tmpdir, "out"),
-                known_entries=known,
+                state=state,
                 delay=0.0,
                 jitter=0.0,
                 timeout=10.0,
                 state_file=state_path,
             )
 
-            assert known["http://example.com/file1.pdf"] == "文件一"
+            assert state.files["http://example.com/file1.pdf"]["title"] == "文件一"
             assert any("Updated name for existing file" in msg for msg in messages if isinstance(msg, str))
     finally:
         pbc_monitor.iterate_listing_pages = original_iterate
