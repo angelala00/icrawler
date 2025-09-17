@@ -101,9 +101,14 @@ python -m icrawler.pbc_monitor --dump-from-file page.html
        数组列出每页的分页信息。
     - `python -m icrawler.pbc_monitor --download-from-structure`：
       默认读取 `artifacts/structure/structure.json` 并下载附件，避免再次遍历网页
-      （可在命令后指定其他结构文件）。
+      （可在命令后指定其他结构文件）。命令会保存结构中的 HTML 详情页、WPS/Word
+      及 PDF 等文件。
      - 或用 `python -m icrawler.pbc_monitor --run-once`：从配置的起始页面开始
-       实时遍历分页并下载附件，`state.json` 会记录已下载链接。
+       实时遍历分页并下载附件（同样包含 HTML 详情页），`state.json` 会记录已下载链接。
+    - 若担心本地文件被手动删除，可追加 `--verify-local`，执行时会检查
+       `state.json` 中记录的路径是否仍然存在，缺失则重新下载。
+    - 历史附件如需切换到新的路径式命名，可运行
+      `python scripts/normalize_filenames.py` 自动重命名并更新 `state.json`。
 5. 结构确认无误后，可选择基于 `--download-from-structure` 的离线下载，或
    直接执行 `--run-once`（或循环模式）进行在线抓取。`state.json` 会记录已
    下载的链接，方便后续增量更新。

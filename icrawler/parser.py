@@ -10,7 +10,16 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 from .crawler import safe_filename
 
 
-ATTACHMENT_SUFFIXES = (".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar")
+ATTACHMENT_SUFFIXES = (
+    ".pdf",
+    ".doc",
+    ".docx",
+    ".wps",
+    ".xls",
+    ".xlsx",
+    ".zip",
+    ".rar",
+)
 PAGINATION_TEXT = {"下一页", "下页", "上一页", "末页", "尾页", "首页"}
 PAGINATION_NEXT = {"下一页", "下页"}
 PAGINATION_PREV = {"上一页", "上页"}
@@ -21,6 +30,7 @@ DOCUMENT_TYPE_MAP = {
     ".pdf": "pdf",
     ".doc": "word",
     ".docx": "word",
+    ".wps": "word",
     ".xls": "excel",
     ".xlsx": "excel",
     ".zip": "archive",
@@ -41,6 +51,7 @@ GENERIC_LINK_TEXT = {
     "pdf",
     "doc",
     "docx",
+    "wps",
     "xls",
     "xlsx",
     "zip",
@@ -50,16 +61,16 @@ GENERIC_LINK_TEXT_LOWER = {text.lower() for text in GENERIC_LINK_TEXT}
 _GENERIC_CLEAN_RE = re.compile(r"[\s：:（）()【】\[\]<>“”\"'·、，。；,.;!！?？]")
 _GENERIC_SUFFIXES = ("版", "本")
 _GENERIC_PATTERN = re.compile(
-    r"^(点击)?(查看|下载|附件)?(word|pdf|docx?|xls|xlsx)?(下载|查看)?$"
+    r"^(点击)?(查看|下载|附件)?(word|wps|pdf|docx?|xls|xlsx)?(下载|查看)?$"
 )
 
 _GENERIC_PHRASE_PATTERNS = [
     re.compile(
-        r"下载\s*(?:word|pdf|docx?|xls|xlsx|zip|rar)\s*(?:版)?",
+        r"下载\s*(?:word|wps|pdf|docx?|xls|xlsx|zip|rar)\s*(?:版)?",
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:word|pdf|docx?|xls|xlsx|zip|rar)\s*下载",
+        r"(?:word|wps|pdf|docx?|xls|xlsx|zip|rar)\s*下载",
         re.IGNORECASE,
     ),
     re.compile(r"附件\s*(?:下载|查看)", re.IGNORECASE),

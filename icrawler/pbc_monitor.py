@@ -6,6 +6,7 @@ import os
 import random
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -116,7 +117,7 @@ def iterate_listing_pages(
             if not filename_base:
                 filename_base = "page"
             filename = f"{filename_base}.html"
-            html_path = _ensure_unique_path(page_cache_dir, filename)
+            html_path = _ensure_unique_path(page_cache_dir, filename, overwrite=True)
             with open(html_path, "w", encoding="utf-8") as handle:
                 handle.write(html)
         soup = BeautifulSoup(html, "html.parser")
@@ -301,6 +302,23 @@ class PBCState:
                 new_doc["local_path"] = local_path
             entry.setdefault("documents", []).append(new_doc)
 
+    def clear_downloaded(self, url_value: str) -> None:
+        file_record = self.files.get(url_value)
+        if file_record:
+            file_record["downloaded"] = False
+            file_record.pop("local_path", None)
+        for entry in self.entries.values():
+            documents = entry.get("documents", [])
+            if not isinstance(documents, list):
+                continue
+            for document in documents:
+                if not isinstance(document, dict):
+                    continue
+                if document.get("url") == url_value:
+                    document.pop("local_path", None)
+                    if "downloaded" in document:
+                        document.pop("downloaded", None)
+
     def update_document_title(self, url_value: str, title: str) -> None:
         if not title:
             return
@@ -428,6 +446,46 @@ def save_state(state_file: Optional[str], state: PBCState) -> None:
         json.dump(state.to_jsonable(), fh, ensure_ascii=False, indent=2)
 
 
+def _local_file_exists(path: Optional[str]) -> bool:
+    if not path or not isinstance(path, str):
+        return False
+    candidate = path if os.path.isabs(path) else os.path.abspath(path)
+    return os.path.exists(candidate)
+
+
+def _ensure_canonical_local_path(
+    file_record: Dict[str, object],
+    doc_record: Optional[Dict[str, object]],
+    url_value: str,
+    doc_type: Optional[str],
+) -> bool:
+    local_path = file_record.get("local_path") if isinstance(file_record, dict) else None
+    if not isinstance(local_path, str) or not local_path:
+        return False
+
+    expected_name = _structured_filename(url_value, doc_type)
+    current_path = Path(local_path)
+    expected_path = current_path.with_name(expected_name)
+
+    if current_path.name == expected_name:
+        return _local_file_exists(local_path)
+
+    old_abs = current_path if current_path.is_absolute() else (Path.cwd() / current_path)
+    new_abs = expected_path if expected_path.is_absolute() else (Path.cwd() / expected_path)
+
+    if old_abs.exists():
+        os.makedirs(new_abs.parent, exist_ok=True)
+        if old_abs != new_abs and not new_abs.exists():
+            old_abs.rename(new_abs)
+    elif not new_abs.exists():
+        return False
+
+    file_record["local_path"] = str(expected_path)
+    if isinstance(doc_record, dict):
+        doc_record["local_path"] = str(expected_path)
+    return True
+
+
 def load_config(path: Optional[str]) -> Dict[str, Any]:
     if not path:
         return {}
@@ -440,14 +498,68 @@ def load_config(path: Optional[str]) -> Dict[str, Any]:
     return data
 
 
-def _ensure_unique_path(output_dir: str, filename: str) -> str:
+def _ensure_unique_path(output_dir: str, filename: str, overwrite: bool = False) -> str:
     base, ext = os.path.splitext(filename)
     candidate = os.path.join(output_dir, filename)
+    if overwrite:
+        return candidate
     counter = 1
     while os.path.exists(candidate):
         candidate = os.path.join(output_dir, f"{base}_{counter}{ext}")
         counter += 1
     return candidate
+
+
+EXTENSION_FALLBACK = {
+    "pdf": ".pdf",
+    "word": ".doc",
+    "excel": ".xls",
+    "archive": ".zip",
+    "text": ".txt",
+    "html": ".html",
+}
+
+
+def _structured_filename(file_url: str, doc_type: Optional[str] = None) -> str:
+    parsed = urlparse(file_url)
+    path = parsed.path or ""
+    segments = [segment for segment in path.strip("/").split("/") if segment]
+
+    if segments:
+        cleaned_segments: List[str] = []
+        for segment in segments:
+            seg_stem, seg_ext = os.path.splitext(segment)
+            if seg_stem:
+                cleaned_segments.append(seg_stem)
+            else:
+                cleaned_segments.append(segment)
+        name_part = "_".join(cleaned_segments)
+    else:
+        name_part = parsed.netloc or "file"
+
+    if parsed.query:
+        query_slug = safe_filename(parsed.query)
+        if query_slug:
+            name_part = f"{name_part}__{query_slug}" if name_part else query_slug
+
+    sanitized = safe_filename(name_part) or "file"
+
+    basename = os.path.basename(path)
+    _, ext = os.path.splitext(basename)
+    ext_lower = ext.lower()
+    if ext_lower:
+        ext_out = ext_lower
+    else:
+        mapped = EXTENSION_FALLBACK.get((doc_type or "").lower())
+        if mapped:
+            ext_out = mapped
+        else:
+            ext_out = ".bin"
+
+    if not ext_out.startswith("."):
+        ext_out = f".{ext_out}"
+
+    return f"{sanitized}{ext_out}"
 
 
 def download_file(
@@ -457,19 +569,55 @@ def download_file(
     delay: float,
     jitter: float,
     timeout: float,
+    preferred_name: Optional[str] = None,
+    overwrite: bool = False,
 ) -> str:
     _sleep(delay, jitter)
     response = session.get(file_url, stream=True, timeout=timeout)
     response.raise_for_status()
     parsed = urlparse(file_url)
-    filename = os.path.basename(parsed.path) or safe_filename(file_url)
+    filename = preferred_name or os.path.basename(parsed.path) or safe_filename(file_url)
     os.makedirs(output_dir, exist_ok=True)
-    target = _ensure_unique_path(output_dir, filename)
+    if overwrite and preferred_name:
+        target = os.path.join(output_dir, filename)
+    else:
+        target = _ensure_unique_path(output_dir, filename)
     with open(target, "wb") as handle:
         for chunk in response.iter_content(chunk_size=8192):
             if chunk:
                 handle.write(chunk)
     return target
+
+
+def download_document(
+    session: requests.Session,
+    file_url: str,
+    output_dir: str,
+    delay: float,
+    jitter: float,
+    timeout: float,
+    doc_type: Optional[str],
+) -> str:
+    normalized_type = (doc_type or "").lower()
+    if normalized_type == "html":
+        html_content = _fetch(session, file_url, delay, jitter, timeout)
+        filename = _structured_filename(file_url, doc_type)
+        os.makedirs(output_dir, exist_ok=True)
+        target = os.path.join(output_dir, filename)
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write(html_content)
+        return target
+    filename = _structured_filename(file_url, doc_type)
+    return download_file(
+        session,
+        file_url,
+        output_dir,
+        delay,
+        jitter,
+        timeout,
+        preferred_name=filename,
+        overwrite=True,
+    )
 
 
 def collect_new_files(
@@ -482,6 +630,7 @@ def collect_new_files(
     timeout: float,
     state_file: Optional[str],
     page_cache_dir: Optional[str],
+    verify_local: bool = False,
 ) -> List[str]:
     downloaded: List[str] = []
     for page_url, soup, _ in iterate_listing_pages(
@@ -508,13 +657,13 @@ def collect_new_files(
                 doc_type = document.get("type")
                 if not isinstance(file_url, str) or not file_url:
                     continue
-                if doc_type == "html":
-                    continue
+                file_record = state.files.get(file_url, {})
                 existing_title = ""
-                if state.is_downloaded(file_url):
-                    existing_title = str(
-                        state.files.get(file_url, {}).get("title") or ""
-                    ).strip()
+                already_downloaded = state.is_downloaded(file_url)
+                if already_downloaded and verify_local:
+                    if not _local_file_exists(file_record.get("local_path")):
+                        state.clear_downloaded(file_url)
+                        already_downloaded = False
                 state.merge_documents(entry_id, [document])
                 stored_entry = state.entries.get(entry_id, {})
                 doc_record = None
@@ -528,7 +677,20 @@ def collect_new_files(
                 if not doc_record:
                     continue
                 display_name = str(doc_record.get("title") or "").strip()
-                if state.is_downloaded(file_url):
+                if already_downloaded and verify_local:
+                    canonical_ok = _ensure_canonical_local_path(
+                        file_record,
+                        doc_record,
+                        file_url,
+                        doc_type or classify_document_type(file_url),
+                    )
+                    if not canonical_ok:
+                        state.clear_downloaded(file_url)
+                        already_downloaded = False
+                        existing_title = ""
+                if already_downloaded:
+                    existing_title = str((file_record or {}).get("title") or "").strip()
+                if already_downloaded:
                     if display_name and display_name != existing_title:
                         save_state(state_file, state)
                         print(
@@ -538,8 +700,14 @@ def collect_new_files(
                     print(f"Skipping existing file: {label} -> {file_url}")
                     continue
                 try:
-                    path = download_file(
-                        session, file_url, output_dir, delay, jitter, timeout
+                    path = download_document(
+                        session,
+                        file_url,
+                        output_dir,
+                        delay,
+                        jitter,
+                        timeout,
+                        doc_type,
                     )
                     downloaded.append(path)
                     label = display_name or stored_entry.get("title") or file_url
@@ -547,7 +715,7 @@ def collect_new_files(
                         entry_id,
                         file_url,
                         display_name or label,
-                        doc_type or classify_document_type(file_url),
+                        (doc_type or classify_document_type(file_url)),
                         path,
                     )
                     save_state(state_file, state)
@@ -564,6 +732,7 @@ def download_from_structure(
     delay: float,
     jitter: float,
     timeout: float,
+    verify_local: bool = False,
 ) -> List[str]:
     with open(structure_path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
@@ -591,11 +760,13 @@ def download_from_structure(
             doc_type = document.get("type")
             if not isinstance(file_url, str) or not file_url:
                 continue
-            if doc_type == "html":
-                continue
+            file_record = state.files.get(file_url, {})
             existing_title = ""
-            if state.is_downloaded(file_url):
-                existing_title = str(state.files.get(file_url, {}).get("title") or "").strip()
+            already_downloaded = state.is_downloaded(file_url)
+            if already_downloaded and verify_local:
+                if not _local_file_exists(file_record.get("local_path")):
+                    state.clear_downloaded(file_url)
+                    already_downloaded = False
             state.merge_documents(entry_id, [document])
             stored_entry = state.entries.get(entry_id, {})
             doc_record = None
@@ -609,7 +780,20 @@ def download_from_structure(
             if not doc_record:
                 continue
             display_name = str(doc_record.get("title") or "").strip()
-            if state.is_downloaded(file_url):
+            if already_downloaded and verify_local:
+                canonical_ok = _ensure_canonical_local_path(
+                    file_record,
+                    doc_record,
+                    file_url,
+                    doc_type or classify_document_type(file_url),
+                )
+                if not canonical_ok:
+                    state.clear_downloaded(file_url)
+                    already_downloaded = False
+                    existing_title = ""
+            if already_downloaded:
+                existing_title = str((file_record or {}).get("title") or "").strip()
+            if already_downloaded:
                 if display_name and display_name != existing_title:
                     save_state(state_file, state)
                     print(f"Updated name for existing file: {display_name} -> {file_url}")
@@ -617,13 +801,14 @@ def download_from_structure(
                 print(f"Skipping existing file: {label} -> {file_url}")
                 continue
             try:
-                path = download_file(
+                path = download_document(
                     session,
                     file_url,
                     output_dir,
                     delay,
                     jitter,
                     timeout,
+                    doc_type,
                 )
                 downloaded.append(path)
                 label = display_name or stored_entry.get("title") or file_url
@@ -631,7 +816,7 @@ def download_from_structure(
                     entry_id,
                     file_url,
                     display_name or label,
-                    doc_type or classify_document_type(file_url),
+                    (doc_type or classify_document_type(file_url)),
                     path,
                 )
                 save_state(state_file, state)
@@ -721,6 +906,7 @@ def monitor_once(
     jitter: float,
     timeout: float,
     page_cache_dir: Optional[str],
+    verify_local: bool = False,
 ) -> List[str]:
     session = requests.Session()
     session.headers.update(DEFAULT_HEADERS)
@@ -737,6 +923,7 @@ def monitor_once(
         timeout,
         state_file,
         page_cache_dir,
+        verify_local,
     )
     save_state(state_file, state)
     return new_files
@@ -760,6 +947,7 @@ def monitor_loop(
     min_hours: float,
     max_hours: float,
     page_cache_dir: Optional[str],
+    verify_local: bool = False,
 ) -> None:
     iteration = 0
     while True:
@@ -773,6 +961,7 @@ def monitor_loop(
             jitter,
             timeout,
             page_cache_dir,
+            verify_local,
         )
         if new_files:
             print(f"New files downloaded: {len(new_files)}")
@@ -875,6 +1064,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         action="store_true",
         help="perform a single check instead of looping",
     )
+    parser.add_argument(
+        "--verify-local",
+        action="store_true",
+        help="re-download attachments if recorded local files are missing",
+    )
     args = parser.parse_args(argv)
 
     config = load_config(args.config)
@@ -904,6 +1098,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     max_hours = float(_resolve_setting(args.max_hours, config, "max_hours", 32.0))
     dump_value = _resolve_setting(args.dump_structure, config, "dump_structure")
     dump_target = _normalize_output_path(dump_value, "structure")
+    verify_local_value = _resolve_setting(args.verify_local, config, "verify_local", False)
+    if isinstance(verify_local_value, str):
+        verify_local = verify_local_value.lower() in {"1", "true", "yes", "on"}
+    else:
+        verify_local = bool(verify_local_value)
     download_value = _resolve_setting(
         args.download_from_structure, config, "download_from_structure"
     )
@@ -972,6 +1171,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             delay,
             jitter,
             timeout,
+            verify_local,
         )
         return
 
@@ -984,6 +1184,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             jitter,
             timeout,
             pages_dir,
+            verify_local,
         )
     else:
         monitor_loop(
@@ -996,6 +1197,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             min_hours,
             max_hours,
             pages_dir,
+            verify_local,
         )
 
 

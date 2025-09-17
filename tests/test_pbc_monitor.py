@@ -1,10 +1,11 @@
 import builtins
 import importlib
 import json
-import os
 import sys
 import tempfile
 import types
+from pathlib import Path
+import os
 
 sys.modules.pop("bs4", None)
 importlib.import_module("bs4")
@@ -42,6 +43,28 @@ def test_extract_file_links():
             "报告全文",
         ),
     ]
+
+
+def test_classify_document_type_wps():
+    assert parser_module.classify_document_type("http://example.com/a.wps") == "word"
+
+
+def test_structured_filename_uses_path_segments():
+    name_html = pbc_monitor._structured_filename(
+        "http://example.com/dir/sub/index.html",
+        "html",
+    )
+    assert name_html == "dir_sub_index.html"
+    name_pdf = pbc_monitor._structured_filename(
+        "http://example.com/resource/cms/2025/08/file.pdf",
+        "pdf",
+    )
+    assert name_pdf == "resource_cms_2025_08_file.pdf"
+    name_word = pbc_monitor._structured_filename(
+        "http://example.com/download?id=42",
+        "word",
+    )
+    assert name_word.startswith("download") and name_word.endswith(".doc")
 
 
 def test_extract_file_links_table_context():
@@ -98,6 +121,19 @@ def test_extract_file_links_prefers_title_attribute():
     ]
 
 
+def test_extract_file_links_supports_wps_extension():
+    html = """
+    <div>
+      <a href="/files/rule.wps">word下载</a>
+    </div>
+    """
+    soup = _make_soup(html)
+    links = pbc_monitor.extract_file_links("http://example.com/list/index.html", soup)
+    assert links == [
+        ("http://example.com/files/rule.wps", "word下载"),
+    ]
+
+
 def test_extract_pagination_meta_from_onclick():
     html = """
     <div class="list_page">
@@ -137,7 +173,16 @@ def test_load_config_and_main(tmp_path):
     captured = {}
     original_monitor_once = pbc_monitor.monitor_once
     try:
-        def fake_monitor_once(start_url, out_dir, state_file, delay, jitter, timeout, page_cache_dir):
+        def fake_monitor_once(
+            start_url,
+            out_dir,
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            page_cache_dir,
+            verify_local=False,
+        ):
             captured.update(
                 {
                     "start_url": start_url,
@@ -180,7 +225,16 @@ def test_main_cli_overrides_config(tmp_path):
     captured = {}
     original_monitor_once = pbc_monitor.monitor_once
     try:
-        def fake_monitor_once(start_url, out_dir, state_file, delay, jitter, timeout, page_cache_dir):
+        def fake_monitor_once(
+            start_url,
+            out_dir,
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            page_cache_dir,
+            verify_local=False,
+        ):
             captured.update(
                 {
                     "start_url": start_url,
@@ -615,8 +669,8 @@ def test_collect_new_files_saves_state_on_each_download():
 
     download_calls = []
 
-    def fake_download_file(session, file_url, output_dir, delay, jitter, timeout):
-        download_calls.append(file_url)
+    def fake_download_document(session, file_url, output_dir, delay, jitter, timeout, doc_type):
+        download_calls.append((file_url, doc_type))
         os.makedirs(output_dir, exist_ok=True)
         if file_url.endswith("file2.pdf"):
             raise RuntimeError("fail second download")
@@ -625,12 +679,12 @@ def test_collect_new_files_saves_state_on_each_download():
     save_calls = []
     skip_messages = []
     original_iterate = pbc_monitor.iterate_listing_pages
-    original_download = pbc_monitor.download_file
+    original_download = pbc_monitor.download_document
     original_save = pbc_monitor.save_state
     original_print = builtins.print
     try:
         pbc_monitor.iterate_listing_pages = fake_iterate
-        pbc_monitor.download_file = fake_download_file
+        pbc_monitor.download_document = fake_download_document
 
         with tempfile.TemporaryDirectory() as tmpdir:
             state_path = os.path.join(tmpdir, "state.json")
@@ -662,8 +716,8 @@ def test_collect_new_files_saves_state_on_each_download():
 
             assert downloaded == [os.path.join(tmpdir, "out", "file1.pdf")]
             assert download_calls == [
-                "http://example.com/file1.pdf",
-                "http://example.com/file2.pdf",
+                ("http://example.com/file1.pdf", "pdf"),
+                ("http://example.com/file2.pdf", "pdf"),
             ]
             assert save_calls
             first_call = save_calls[0]
@@ -699,7 +753,7 @@ def test_collect_new_files_saves_state_on_each_download():
             assert any("Skipping existing file" in msg for msg in skip_messages)
     finally:
         pbc_monitor.iterate_listing_pages = original_iterate
-        pbc_monitor.download_file = original_download
+        pbc_monitor.download_document = original_download
         pbc_monitor.save_state = original_save
         builtins.print = original_print
 
@@ -826,6 +880,53 @@ def test_dump_structure_default_artifacts(tmp_path):
     assert data["pages"][0]["html_path"].endswith("page_001_index.html")
 
 
+def test_snapshot_listing_overwrites_cached_pages(tmp_path):
+    start_url = "http://example.com/list/index.html"
+    page_cache_dir = os.path.join(tmp_path, "pages")
+    counter = {"value": 0}
+
+    def fake_fetch(session, url, delay, jitter, timeout):
+        counter["value"] += 1
+        return f"<html><body>version {counter['value']}</body></html>"
+
+    original_fetch = pbc_monitor._fetch
+    original_session = getattr(pbc_monitor.requests, "Session", None)
+    try:
+        pbc_monitor._fetch = fake_fetch
+        pbc_monitor.requests.Session = lambda: types.SimpleNamespace(headers={})
+
+        snapshot1 = pbc_monitor.snapshot_listing(
+            start_url,
+            delay=0.0,
+            jitter=0.0,
+            timeout=5.0,
+            page_cache_dir=page_cache_dir,
+        )
+        page_path = snapshot1["pages"][0]["html_path"]
+        with open(page_path, "r", encoding="utf-8") as handle:
+            assert "version 1" in handle.read()
+
+        snapshot2 = pbc_monitor.snapshot_listing(
+            start_url,
+            delay=0.0,
+            jitter=0.0,
+            timeout=5.0,
+            page_cache_dir=page_cache_dir,
+        )
+        assert snapshot2["pages"][0]["html_path"] == page_path
+        with open(page_path, "r", encoding="utf-8") as handle:
+            assert "version 2" in handle.read()
+
+        html_files = [name for name in os.listdir(page_cache_dir) if name.endswith(".html")]
+        assert len(html_files) == 1
+    finally:
+        pbc_monitor._fetch = original_fetch
+        if original_session is not None:
+            pbc_monitor.requests.Session = original_session
+        elif hasattr(pbc_monitor.requests, "Session"):
+            delattr(pbc_monitor.requests, "Session")
+
+
 def test_download_from_structure_downloads_files(tmp_path):
     structure_path = os.path.join(tmp_path, "structure.json")
     output_dir = os.path.join(tmp_path, "downloads")
@@ -838,10 +939,15 @@ def test_download_from_structure_downloads_files(tmp_path):
                 "remark": "",
                 "documents": [
                     {
+                        "url": "http://example.com/detail.html",
+                        "type": "html",
+                        "title": "公告详情",
+                    },
+                    {
                         "url": "http://example.com/file1.pdf",
                         "type": "pdf",
                         "title": "附件一",
-                    }
+                    },
                 ],
             }
         ]
@@ -850,17 +956,24 @@ def test_download_from_structure_downloads_files(tmp_path):
         json.dump(structure_data, handle)
 
     downloaded_targets = []
-    original_download_file = pbc_monitor.download_file
+    download_calls = []
+    original_download_document = pbc_monitor.download_document
     try:
-        def fake_download_file(session, file_url, out_dir, delay, jitter, timeout):
-            target = os.path.join(out_dir, os.path.basename(file_url))
+        def fake_download_document(session, file_url, out_dir, delay, jitter, timeout, doc_type):
+            download_calls.append((file_url, doc_type))
             os.makedirs(out_dir, exist_ok=True)
+            name = os.path.basename(file_url)
+            if not name:
+                name = pbc_monitor.safe_filename(file_url)
+            if (doc_type or "").lower() == "html" and not name.lower().endswith((".html", ".htm")):
+                name = f"{name}.html"
+            target = os.path.join(out_dir, name)
             with open(target, "w", encoding="utf-8") as fh:
-                fh.write("dummy")
+                fh.write(f"dummy for {doc_type}")
             downloaded_targets.append(target)
             return target
 
-        pbc_monitor.download_file = fake_download_file
+        pbc_monitor.download_document = fake_download_document
         result = pbc_monitor.download_from_structure(
             structure_path,
             output_dir,
@@ -870,17 +983,123 @@ def test_download_from_structure_downloads_files(tmp_path):
             timeout=5.0,
         )
     finally:
-        pbc_monitor.download_file = original_download_file
+        pbc_monitor.download_document = original_download_document
 
     assert result == downloaded_targets
-    assert len(downloaded_targets) == 1
+    assert download_calls == [
+        ("http://example.com/detail.html", "html"),
+        ("http://example.com/file1.pdf", "pdf"),
+    ]
+    assert len(downloaded_targets) == 2
     with open(state_path, "r", encoding="utf-8") as handle:
         state_data = json.load(handle)
     entry = state_data["entries"][0]
-    document = entry["documents"][0]
-    assert document["url"] == "http://example.com/file1.pdf"
-    assert document["downloaded"] is True
-    assert os.path.basename(document["local_path"]) == "file1.pdf"
+    documents = {doc["url"]: doc for doc in entry["documents"]}
+    html_doc = documents["http://example.com/detail.html"]
+    pdf_doc = documents["http://example.com/file1.pdf"]
+    assert html_doc["downloaded"] is True
+    assert html_doc["local_path"].endswith("detail.html")
+    assert pdf_doc["downloaded"] is True
+    assert pdf_doc["local_path"].endswith("file1.pdf")
+
+
+def test_download_document_html_uses_path_segments(tmp_path):
+    original_fetch = pbc_monitor._fetch
+    try:
+        pbc_monitor._fetch = lambda session, url, delay, jitter, timeout: "<html>content</html>"
+        path = pbc_monitor.download_document(
+            session=None,
+            file_url="http://example.com/dir/sub/index.html",
+            output_dir=os.path.join(tmp_path, "out"),
+            delay=0.0,
+            jitter=0.0,
+            timeout=5.0,
+            doc_type="html",
+        )
+    finally:
+        pbc_monitor._fetch = original_fetch
+
+    assert os.path.basename(path) == "dir_sub_index.html"
+    with open(path, "r", encoding="utf-8") as handle:
+        assert "content" in handle.read()
+
+
+def test_collect_new_files_downloads_html_documents(tmp_path):
+    entries = [
+        {
+            "serial": 1,
+            "title": "公告A",
+            "remark": "",
+            "documents": [
+                {
+                    "url": "http://example.com/detail.html",
+                    "type": "html",
+                    "title": "详情",
+                },
+                {
+                    "url": "http://example.com/file.pdf",
+                    "type": "pdf",
+                    "title": "附件",
+                },
+            ],
+        }
+    ]
+
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+        yield start_url, _make_soup("<html></html>"), None
+
+    def fake_extract_listing_entries(page_url, soup):
+        return entries
+
+    download_calls = []
+
+    def fake_download_document(session, file_url, output_dir, delay, jitter, timeout, doc_type):
+        os.makedirs(output_dir, exist_ok=True)
+        name = os.path.basename(file_url)
+        if not name:
+            name = pbc_monitor.safe_filename(file_url)
+        if (doc_type or "").lower() == "html" and not name.lower().endswith((".html", ".htm")):
+            name = f"{name}.html"
+        target = os.path.join(output_dir, name)
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write(doc_type or "")
+        download_calls.append((file_url, doc_type, target))
+        return target
+
+    original_iterate = pbc_monitor.iterate_listing_pages
+    original_extract = pbc_monitor.extract_listing_entries
+    original_download = pbc_monitor.download_document
+    try:
+        pbc_monitor.iterate_listing_pages = fake_iterate
+        pbc_monitor.extract_listing_entries = fake_extract_listing_entries
+        pbc_monitor.download_document = fake_download_document
+
+        state = pbc_monitor.PBCState()
+        output_dir = os.path.join(tmp_path, "out")
+        downloaded = pbc_monitor.collect_new_files(
+            session=None,
+            start_url="http://example.com/index.html",
+            output_dir=output_dir,
+            state=state,
+            delay=0.0,
+            jitter=0.0,
+            timeout=10.0,
+            state_file=None,
+            page_cache_dir=None,
+        )
+
+        assert len(downloaded) == 2
+        assert download_calls == [
+            ("http://example.com/detail.html", "html", os.path.join(output_dir, "detail.html")),
+            ("http://example.com/file.pdf", "pdf", os.path.join(output_dir, "file.pdf")),
+        ]
+        assert state.is_downloaded("http://example.com/detail.html")
+        html_doc = state.files["http://example.com/detail.html"]
+        assert html_doc["local_path"].endswith("detail.html")
+    finally:
+        pbc_monitor.iterate_listing_pages = original_iterate
+        pbc_monitor.extract_listing_entries = original_extract
+        pbc_monitor.download_document = original_download
 
 
 def test_download_from_structure_skips_existing(tmp_path):
@@ -927,12 +1146,12 @@ def test_download_from_structure_skips_existing(tmp_path):
     with open(state_path, "w", encoding="utf-8") as handle:
         json.dump(existing_state, handle)
 
-    original_download_file = pbc_monitor.download_file
+    original_download_document = pbc_monitor.download_document
     try:
-        def fail_download_file(*_args, **_kwargs):
-            raise AssertionError("download_file should not be called")
+        def fail_download_document(*_args, **_kwargs):
+            raise AssertionError("download_document should not be called")
 
-        pbc_monitor.download_file = fail_download_file
+        pbc_monitor.download_document = fail_download_document
         result = pbc_monitor.download_from_structure(
             structure_path,
             output_dir,
@@ -942,13 +1161,101 @@ def test_download_from_structure_skips_existing(tmp_path):
             timeout=5.0,
         )
     finally:
-        pbc_monitor.download_file = original_download_file
+        pbc_monitor.download_document = original_download_document
 
     assert result == []
     with open(state_path, "r", encoding="utf-8") as handle:
         state_data = json.load(handle)
     document = state_data["entries"][0]["documents"][0]
     assert document["title"] == "新附件名"
+
+
+def test_collect_new_files_verify_local_recovers_missing(tmp_path):
+    document_url = "http://example.com/file.pdf"
+    entry_data = [{
+        "serial": 1,
+        "title": "公告A",
+        "remark": "",
+        "documents": [
+            {"url": document_url, "type": "pdf", "title": "附件"}
+        ],
+    }]
+
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+        yield start_url, _make_soup("<html></html>"), None
+
+    def fake_extract_listing_entries(page_url, soup):
+        return entry_data
+
+    downloads = []
+
+    def fake_download_document(session, file_url, output_dir, delay, jitter, timeout, doc_type):
+        os.makedirs(output_dir, exist_ok=True)
+        target = os.path.join(output_dir, "file.pdf")
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write("re-downloaded")
+        downloads.append(file_url)
+        return target
+
+    original_iterate = pbc_monitor.iterate_listing_pages
+    original_extract = pbc_monitor.extract_listing_entries
+    original_download = pbc_monitor.download_document
+    try:
+        pbc_monitor.iterate_listing_pages = fake_iterate
+        pbc_monitor.extract_listing_entries = fake_extract_listing_entries
+        pbc_monitor.download_document = fake_download_document
+
+        state = pbc_monitor.PBCState()
+        entry_id = state.ensure_entry(entry_data[0])
+        state.merge_documents(entry_id, entry_data[0]["documents"])
+        missing_path = os.path.join(tmp_path, "missing.pdf")
+        state.mark_downloaded(entry_id, document_url, "附件", "pdf", missing_path)
+
+        state_file = os.path.join(tmp_path, "state.json")
+        output_dir = os.path.join(tmp_path, "out")
+
+        # verify_local disabled -> treated as already downloaded
+        result = pbc_monitor.collect_new_files(
+            session=None,
+            start_url="http://example.com/index.html",
+            output_dir=output_dir,
+            state=state,
+            delay=0.0,
+            jitter=0.0,
+            timeout=5.0,
+            state_file=state_file,
+            page_cache_dir=None,
+            verify_local=False,
+        )
+        assert result == []
+        assert downloads == []
+        assert state.is_downloaded(document_url)
+
+        # enable verify_local -> should re-download missing file
+        result = pbc_monitor.collect_new_files(
+            session=None,
+            start_url="http://example.com/index.html",
+            output_dir=output_dir,
+            state=state,
+            delay=0.0,
+            jitter=0.0,
+            timeout=5.0,
+            state_file=state_file,
+            page_cache_dir=None,
+            verify_local=True,
+        )
+        assert downloads == [document_url]
+        assert len(result) == 1
+        updated_record = state.files[document_url]
+        assert updated_record.get("downloaded") is True
+        local_path = updated_record.get("local_path")
+        assert local_path and os.path.exists(local_path)
+        expected_name = pbc_monitor._structured_filename(document_url, "pdf")
+        assert Path(local_path).name == expected_name
+    finally:
+        pbc_monitor.iterate_listing_pages = original_iterate
+        pbc_monitor.extract_listing_entries = original_extract
+        pbc_monitor.download_document = original_download
 
 
 def test_main_download_from_structure(tmp_path):
@@ -971,7 +1278,15 @@ def test_main_download_from_structure(tmp_path):
     captured = {}
     original_download_from_structure = pbc_monitor.download_from_structure
     try:
-        def fake_download_from_structure(structure_path_arg, out_dir, state_file, delay, jitter, timeout):
+        def fake_download_from_structure(
+            structure_path_arg,
+            out_dir,
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            verify_local=False,
+        ):
             captured.update(
                 {
                     "structure_path": structure_path_arg,
@@ -980,6 +1295,7 @@ def test_main_download_from_structure(tmp_path):
                     "delay": delay,
                     "jitter": jitter,
                     "timeout": timeout,
+                    "verify_local": verify_local,
                 }
             )
             return []
@@ -996,3 +1312,56 @@ def test_main_download_from_structure(tmp_path):
     assert captured["delay"] == 3.0
     assert captured["jitter"] == 2.0
     assert captured["timeout"] == 30.0
+    assert captured["verify_local"] is False
+
+
+def test_main_download_from_structure_verify_local(tmp_path):
+    artifact_dir = os.path.join(tmp_path, "artifacts")
+    structure_dir = os.path.join(artifact_dir, "structure")
+    os.makedirs(structure_dir, exist_ok=True)
+    structure_path = os.path.join(structure_dir, "structure.json")
+    with open(structure_path, "w", encoding="utf-8") as handle:
+        json.dump({"entries": []}, handle)
+
+    output_dir = os.path.join(tmp_path, "downloads")
+    config_path = os.path.join(tmp_path, "config.json")
+    config_data = {
+        "output_dir": output_dir,
+        "artifact_dir": artifact_dir,
+        "verify_local": True,
+    }
+    with open(config_path, "w", encoding="utf-8") as handle:
+        json.dump(config_data, handle)
+
+    captured = {}
+    original_download_from_structure = pbc_monitor.download_from_structure
+    try:
+        def fake_download_from_structure(
+            structure_path_arg,
+            out_dir,
+            state_file,
+            delay,
+            jitter,
+            timeout,
+            verify_local=False,
+        ):
+            captured.update(
+                {
+                    "structure_path": structure_path_arg,
+                    "output_dir": out_dir,
+                    "state_file": state_file,
+                    "delay": delay,
+                    "jitter": jitter,
+                    "timeout": timeout,
+                    "verify_local": verify_local,
+                }
+            )
+            return []
+
+        pbc_monitor.download_from_structure = fake_download_from_structure
+        pbc_monitor.main(["--config", config_path, "--download-from-structure"])
+    finally:
+        pbc_monitor.download_from_structure = original_download_from_structure
+
+    assert captured["structure_path"] == structure_path
+    assert captured["verify_local"] is True
