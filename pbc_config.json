@@ -1,5 +1,5 @@
 {
-  "artifact_dir": "artifacts",
+  "artifact_dir": "/opt/dl",
   "delay": 3.0,
   "jitter": 2.0,
   "timeout": 30.0,
@@ -7,7 +7,7 @@
     {
       "name": "regulator_notice",
       "start_url": "http://www.pbc.gov.cn/zhengwugongkai/4081330/4406346/4406348/index.html",
-      "output_dir": "artifacts/downloads",
+      "output_dir": "/opt/dl/downloads",
       "state_file": "state/state.json",
       "structure_file": "structure/structure.json",
       "parser": "icrawler.parser"
@@ -15,7 +15,7 @@
     {
       "name": "policy_updates",
       "start_url": "http://www.pbc.gov.cn/zhengwugongkai/4081330/4406346/4693545/index.html",
-      "output_dir": "artifacts/downloads_policy",
+      "output_dir": "/opt/dl/downloads_policy",
       "state_file": "state/policy_state.json",
       "structure_file": "structure/policy_structure.json",
       "parser": "icrawler.parser_policy",

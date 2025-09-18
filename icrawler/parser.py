@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -244,7 +244,7 @@ def _extract_remark(cell: Tag, title_text: str) -> str:
     return text.strip()
 
 
-def _extract_structured_entries(
+def _extract_table_entries(
     page_url: str,
     soup: BeautifulSoup,
     suffixes: Sequence[str],
@@ -342,6 +342,103 @@ def _extract_structured_entries(
             }
         )
     return entries
+
+
+def _extract_txtlist_entries(
+    page_url: str,
+    soup: BeautifulSoup,
+    suffixes: Sequence[str],
+) -> List[Dict[str, object]]:
+    containers = [
+        container
+        for container in soup.find_all("ul", class_="txtlist")
+        if isinstance(container, Tag)
+    ]
+    if not containers:
+        return []
+
+    entries: List[Dict[str, object]] = []
+    seen_detail_urls: Set[str] = set()
+
+    for container in containers:
+        items = [
+            item
+            for item in container.find_all("li", recursive=False)
+            if isinstance(item, Tag)
+        ]
+        for item in items:
+            link = item.find("a", href=True)
+            if not link:
+                continue
+            raw_href = (link.get("href") or "").strip()
+            if not raw_href:
+                continue
+            detail_url = urljoin(page_url, raw_href)
+            if detail_url in seen_detail_urls:
+                continue
+
+            title_attr = link.get("title")
+            if isinstance(title_attr, str) and title_attr.strip():
+                title = title_attr.strip()
+            else:
+                title = link.get_text(" ", strip=True)
+
+            remark_parts: List[str] = []
+            date_span = item.find("span", class_="date")
+            if date_span:
+                date_text = date_span.get_text(" ", strip=True)
+                if date_text:
+                    remark_parts.append(date_text)
+
+            documents: List[Dict[str, object]] = []
+            seen_docs: Dict[str, Dict[str, object]] = {}
+            html_record = {"type": "html", "url": detail_url, "title": title}
+            documents.append(html_record)
+            seen_docs[detail_url] = html_record
+
+            for anchor in item.find_all("a", href=True):
+                if anchor is link:
+                    continue
+                href = (anchor.get("href") or "").strip()
+                if not href:
+                    continue
+                absolute = urljoin(page_url, href)
+                if absolute in seen_docs:
+                    continue
+                doc_type = classify_document_type(absolute)
+                path = urlparse(absolute).path.lower()
+                if doc_type == "other" and not any(
+                    path.endswith(suffix) for suffix in suffixes
+                ):
+                    continue
+                label = _attachment_name(anchor, absolute)
+                doc_record = {"type": doc_type, "url": absolute, "title": label}
+                documents.append(doc_record)
+                seen_docs[absolute] = doc_record
+
+            remark = " ".join(part for part in remark_parts if part).strip()
+            entries.append(
+                {
+                    "serial": len(entries) + 1,
+                    "title": title,
+                    "remark": remark,
+                    "documents": documents,
+                }
+            )
+            seen_detail_urls.add(detail_url)
+
+    return entries
+
+
+def _extract_structured_entries(
+    page_url: str,
+    soup: BeautifulSoup,
+    suffixes: Sequence[str],
+) -> List[Dict[str, object]]:
+    table_entries = _extract_table_entries(page_url, soup, suffixes)
+    if table_entries:
+        return table_entries
+    return _extract_txtlist_entries(page_url, soup, suffixes)
 
 
 def _legacy_extract_file_links(
