@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import logging
 import os
 import random
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -20,8 +21,40 @@ from .crawler import safe_filename
 from .fetcher import DEFAULT_HEADERS, get as http_get, sleep_with_jitter
 from .parser import classify_document_type as _default_classify_document_type
 
+
+logger = logging.getLogger(__name__)
+
 DEFAULT_PARSER_SPEC = "icrawler.parser"
 _current_parser_module: ModuleType = importlib.import_module(DEFAULT_PARSER_SPEC)
+
+
+def _create_session() -> requests.Session:
+    """Return a requests-like session with default headers applied."""
+
+    session_factory = getattr(requests, "Session", None)
+    session: Optional[requests.Session]
+    if callable(session_factory):
+        try:
+            session = session_factory()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug("Failed to create requests session: %s", exc)
+            session = None
+    else:
+        session = None
+
+    if session is None:
+        logger.debug("Falling back to simple session stub")
+        session = SimpleNamespace(headers={}, close=lambda: None)
+        get_callable = getattr(requests, "get", None)
+        if callable(get_callable):
+            setattr(session, "get", get_callable)
+
+    headers = getattr(session, "headers", None)
+    if isinstance(headers, dict):
+        headers.update(DEFAULT_HEADERS)
+    else:
+        setattr(session, "headers", dict(DEFAULT_HEADERS))
+    return session  # type: ignore[return-value]
 
 
 def _load_parser_module(spec: Optional[str]) -> ModuleType:
@@ -57,8 +90,44 @@ def extract_file_links(
 ) -> List[Tuple[str, str]]:
     func = _parser_call("extract_file_links")
     if suffixes is None:
-        return func(page_url, soup)
-    return func(page_url, soup, suffixes)
+        links = func(page_url, soup)
+    else:
+        links = func(page_url, soup, suffixes)
+
+    def _is_filename_title(title: str, file_url: str) -> bool:
+        if not title:
+            return True
+        parsed = urlparse(file_url)
+        basename = os.path.basename(parsed.path or "")
+        if not basename:
+            return False
+        return title.strip().lower() == basename.lower()
+
+    def _find_anchor_text(target_url: str) -> Optional[str]:
+        for anchor in soup.find_all("a", href=True):
+            href = (anchor.get("href") or "").strip()
+            if not href:
+                continue
+            resolved = urljoin(page_url, href)
+            if resolved != target_url:
+                continue
+            title_attr = (anchor.get("title") or "").strip()
+            if title_attr:
+                return title_attr
+            text = anchor.get_text(" ", strip=True)
+            if text:
+                return text
+        return None
+
+    cleaned: List[Tuple[str, str]] = []
+    for file_url, display_name in links:
+        title = display_name if isinstance(display_name, str) else ""
+        if _is_filename_title(title, file_url):
+            anchor_text = _find_anchor_text(file_url)
+            if anchor_text:
+                title = anchor_text
+        cleaned.append((file_url, title))
+    return cleaned
 
 
 def extract_pagination_links(
@@ -75,9 +144,13 @@ def snapshot_entries(html: str, base_url: str) -> Dict[str, object]:
     return func(html, base_url)
 
 
-def snapshot_local_file(path: str) -> Dict[str, object]:
+def _parser_snapshot_local_file(
+    path: str, base_url: Optional[str] = None
+) -> Dict[str, object]:
     func = _parser_call("snapshot_local_file")
-    return func(path)
+    if base_url is None:
+        return func(path)
+    return func(path, base_url)
 
 
 def extract_pagination_meta(
@@ -145,9 +218,8 @@ def _build_tasks(
 
     # If CLI positional overrides are provided, treat as single ad-hoc task.
     if args.start_url or args.output_dir:
-        start_url = _select_task_value(args.start_url, None, config, "start_url")
-        if not start_url:
-            raise SystemExit("start_url must be provided via CLI or config")
+        start_url_value = _select_task_value(args.start_url, None, config, "start_url")
+        start_url_str = str(start_url_value) if start_url_value is not None else ""
         output_dir = _select_task_value(args.output_dir, None, config, "output_dir")
         parser_spec = _select_task_value(None, None, config, "parser")
         download_types = _normalize_download_types(
@@ -159,19 +231,23 @@ def _build_tasks(
             verify_local = bool(config.get("verify_local", False))
         state_file = _select_task_value(args.state_file, None, config, "state_file", "state.json")
         name = args.task or "default"
-        return [
-            TaskSpec(
-                name=name,
-                start_url=str(start_url),
-                output_dir=str(output_dir) if output_dir else "",
-                state_file=state_file,
-                parser_spec=parser_spec,
-                allowed_types=download_types,
-                verify_local=verify_local,
-                raw_config={},
-                from_task_list=False,
-            )
-        ]
+        task = TaskSpec(
+            name=name,
+            start_url=start_url_str,
+            output_dir=str(output_dir) if output_dir else "",
+            state_file=state_file,
+            parser_spec=parser_spec,
+            allowed_types=download_types,
+            verify_local=verify_local,
+            raw_config={},
+            from_task_list=False,
+        )
+        logger.info(
+            "Prepared CLI override task '%s' with start URL %s",
+            task.name,
+            task.start_url,
+        )
+        return [task]
 
     task_specs: List[TaskSpec] = []
 
@@ -182,9 +258,8 @@ def _build_tasks(
             name = str(raw_task.get("name") or f"task{index + 1}")
             if args.task and args.task != name:
                 continue
-            start_url = _select_task_value(None, raw_task, config, "start_url")
-            if not start_url:
-                raise SystemExit(f"start_url must be provided for task '{name}'")
+            start_url_value = _select_task_value(None, raw_task, config, "start_url")
+            start_url_str = str(start_url_value) if start_url_value is not None else ""
             output_dir = _select_task_value(None, raw_task, config, "output_dir")
             parser_spec = _select_task_value(None, raw_task, config, "parser")
             download_types = _normalize_download_types(
@@ -201,7 +276,7 @@ def _build_tasks(
             task_specs.append(
                 TaskSpec(
                     name=name,
-                    start_url=str(start_url),
+                    start_url=start_url_str,
                     output_dir=str(output_dir) if output_dir else "",
                     state_file=state_file,
                     parser_spec=parser_spec,
@@ -214,12 +289,16 @@ def _build_tasks(
         if args.task and not task_specs:
             raise SystemExit(f"Task '{args.task}' not found in configuration")
         if task_specs:
+            logger.info(
+                "Prepared %d configured task(s): %s",
+                len(task_specs),
+                ", ".join(spec.name for spec in task_specs),
+            )
             return task_specs
 
     # Fallback to single-task configuration.
-    start_url = _select_task_value(args.start_url, None, config, "start_url")
-    if not start_url:
-        raise SystemExit("start_url must be provided via CLI or config")
+    start_url_value = _select_task_value(args.start_url, None, config, "start_url")
+    start_url_str = str(start_url_value) if start_url_value is not None else ""
     output_dir = _select_task_value(args.output_dir, None, config, "output_dir")
     parser_spec = _select_task_value(None, None, config, "parser")
     download_types = _normalize_download_types(config.get("download_types"))
@@ -229,19 +308,23 @@ def _build_tasks(
         verify_local = bool(config.get("verify_local", False))
     state_file = _select_task_value(args.state_file, None, config, "state_file", "state.json")
     name = args.task or "default"
-    return [
-        TaskSpec(
-            name=name,
-            start_url=str(start_url),
-            output_dir=str(output_dir) if output_dir else "",
-            state_file=state_file,
-            parser_spec=parser_spec,
-            allowed_types=download_types,
-            verify_local=verify_local,
-            raw_config=config,
-            from_task_list=False,
-        )
-    ]
+    task = TaskSpec(
+        name=name,
+        start_url=start_url_str,
+        output_dir=str(output_dir) if output_dir else "",
+        state_file=state_file,
+        parser_spec=parser_spec,
+        allowed_types=download_types,
+        verify_local=verify_local,
+        raw_config=config,
+        from_task_list=False,
+    )
+    logger.info(
+        "Prepared default task '%s' with start URL %s",
+        task.name,
+        task.start_url,
+    )
+    return [task]
 
 
 def _run_task(
@@ -250,8 +333,6 @@ def _run_task(
     config: Dict[str, Any],
     artifact_dir: str,
 ) -> None:
-    if not task.start_url:
-        raise SystemExit(f"start_url must be provided for task '{task.name}'")
 
     parser_module = _load_parser_module(task.parser_spec)
     _set_parser_module(parser_module)
@@ -322,8 +403,17 @@ def _run_task(
         task.name if task.from_task_list else None,
     ) if dump_from_file_value else None
 
-    start_url = str(task.start_url)
+    start_url = str(task.start_url) if task.start_url else ""
     output_dir = str(task.output_dir) if task.output_dir else None
+
+    logger.info(
+        "Starting task '%s': start_url=%s, output_dir=%s, state_file=%s",
+        task.name,
+        start_url or "(none)",
+        output_dir or "(none)",
+        state_file or "(none)",
+    )
+    logger.info("Using page cache directory: %s", pages_dir)
 
     delay = float(_select_task_value(args.delay, task.raw_config, config, "delay", 3.0))
     jitter = float(_select_task_value(args.jitter, task.raw_config, config, "jitter", 2.0))
@@ -334,7 +424,27 @@ def _run_task(
     allowed_types = task.allowed_types
     verify_local = task.verify_local
 
-    if not dump_from_file and not download_target and start_url is None:
+    logger.info(
+        "HTTP options for task '%s': delay=%.2fs, jitter=%.2fs, timeout=%.2fs",
+        task.name,
+        delay,
+        jitter,
+        timeout,
+    )
+    if not args.run_once and not dump_target and not fetch_target and not dump_from_file and not download_target:
+        logger.info(
+            "Monitor sleep window: %.2f-%.2f hours",
+            min_hours,
+            max_hours,
+        )
+    if allowed_types:
+        logger.info(
+            "Allowed document types: %s",
+            ", ".join(sorted(allowed_types)),
+        )
+    logger.info("Verify local files: %s", "enabled" if verify_local else "disabled")
+
+    if not dump_from_file and not download_target and not start_url:
         raise SystemExit(f"start_url must be provided for task '{task.name}'")
 
     if (
@@ -347,21 +457,44 @@ def _run_task(
         raise SystemExit(f"output_dir must be provided for task '{task.name}'")
 
     if dump_from_file:
-        snapshot = snapshot_local_file(dump_from_file, start_url)
+        logger.info(
+            "Dumping structure for task '%s' from local file %s",
+            task.name,
+            dump_from_file,
+        )
+        snapshot = snapshot_local_file(dump_from_file, start_url or None)
         print(json.dumps(snapshot, ensure_ascii=False, indent=2))
         return
 
     if fetch_target:
+        if not start_url:
+            raise SystemExit("start_url must be provided to fetch listing HTML")
+        logger.info(
+            "Fetching start page %s for task '%s' to %s",
+            start_url,
+            task.name,
+            "stdout" if fetch_target == "-" else fetch_target,
+        )
         html_content = fetch_listing_html(str(start_url), delay, jitter, timeout)
         if fetch_target == "-":
             print(html_content)
+            logger.info("Fetched HTML written to stdout")
         else:
             os.makedirs(os.path.dirname(fetch_target), exist_ok=True)
             with open(str(fetch_target), "w", encoding="utf-8") as handle:
                 handle.write(html_content)
+            logger.info("Fetched HTML saved to %s", fetch_target)
         return
 
     if dump_target:
+        if not start_url:
+            raise SystemExit("start_url must be provided to dump listing structure")
+        logger.info(
+            "Dumping listing structure for task '%s' from %s to %s",
+            task.name,
+            start_url,
+            "stdout" if dump_target == "-" else dump_target,
+        )
         snapshot = snapshot_listing(
             str(start_url),
             delay,
@@ -371,10 +504,12 @@ def _run_task(
         )
         if dump_target == "-":
             print(json.dumps(snapshot, ensure_ascii=False, indent=2))
+            logger.info("Listing snapshot written to stdout")
         else:
             os.makedirs(os.path.dirname(dump_target), exist_ok=True)
             with open(str(dump_target), "w", encoding="utf-8") as handle:
                 json.dump(snapshot, handle, ensure_ascii=False, indent=2)
+            logger.info("Listing snapshot saved to %s", dump_target)
         return
 
     if download_target:
@@ -384,6 +519,12 @@ def _run_task(
             raise SystemExit(f"Structure file not found: {download_target}")
         if output_dir is None:
             raise SystemExit("output_dir must be provided to download attachments")
+        logger.info(
+            "Downloading attachments for task '%s' from %s into %s",
+            task.name,
+            download_target,
+            output_dir,
+        )
         download_from_structure(
             download_target,
             str(output_dir),
@@ -394,9 +535,13 @@ def _run_task(
             allowed_types,
             verify_local,
         )
+        logger.info("Attachment download finished")
         return
 
     if args.run_once:
+        if not start_url:
+            raise SystemExit("start_url must be provided to run monitor")
+        logger.info("Running single monitoring iteration for task '%s'", task.name)
         monitor_once(
             str(start_url),
             str(output_dir),
@@ -409,6 +554,14 @@ def _run_task(
             verify_local,
         )
     else:
+        if not start_url:
+            raise SystemExit("start_url must be provided to run monitor")
+        logger.info(
+            "Entering monitoring loop for task '%s' with sleep window %.2f-%.2f hours",
+            task.name,
+            min_hours,
+            max_hours,
+        )
         monitor_loop(
             str(start_url),
             str(output_dir),
@@ -459,7 +612,16 @@ def iterate_listing_pages(
         url = queue.pop(0)
         if url in visited:
             continue
+        logger.info("Fetching listing page: %s", url)
+        fetch_start = time.time()
         html = _fetch(session, url, delay, jitter, timeout)
+        duration = time.time() - fetch_start
+        logger.info(
+            "Fetched listing page: %s (%.2f seconds, %d bytes)",
+            url,
+            duration,
+            len(html),
+        )
         html_path: Optional[str] = None
         if page_cache_dir:
             os.makedirs(page_cache_dir, exist_ok=True)
@@ -482,12 +644,22 @@ def iterate_listing_pages(
             html_path = _ensure_unique_path(page_cache_dir, filename, overwrite=True)
             with open(html_path, "w", encoding="utf-8") as handle:
                 handle.write(html)
+            logger.info("Cached listing page %s to %s", url, html_path)
         soup = BeautifulSoup(html, "html.parser")
         yield url, soup, html_path
         visited.add(url)
+        new_links: List[str] = []
         for link in extract_pagination_links(url, soup, start_url):
-            if link not in visited and link not in queue:
+            if link not in visited and link not in queue and link not in new_links:
                 queue.append(link)
+                new_links.append(link)
+        if new_links:
+            logger.info(
+                "Discovered %d pagination link(s) from %s",
+                len(new_links),
+                url,
+            )
+            logger.info("Pagination queue size is now %d", len(queue))
 
 class PBCState:
     def __init__(self) -> None:
@@ -524,7 +696,38 @@ class PBCState:
         return safe_filename(serialized)
 
     def ensure_entry(self, entry: Dict[str, object]) -> str:
-        entry_id = self._entry_id(entry)
+        entry_id: Optional[str] = None
+        documents = entry.get("documents")
+        if isinstance(documents, list):
+            for document in documents:
+                if not isinstance(document, dict):
+                    continue
+                url_value = document.get("url")
+                if not isinstance(url_value, str) or not url_value:
+                    continue
+                file_record = self.files.get(url_value)
+                if isinstance(file_record, dict):
+                    existing_id = file_record.get("entry_id")
+                    if isinstance(existing_id, str) and existing_id in self.entries:
+                        entry_id = existing_id
+                        break
+                for existing_id, existing_entry in self.entries.items():
+                    documents_list = existing_entry.get("documents", [])
+                    if not isinstance(documents_list, list):
+                        continue
+                    for existing_doc in documents_list:
+                        if (
+                            isinstance(existing_doc, dict)
+                            and existing_doc.get("url") == url_value
+                        ):
+                            entry_id = existing_id
+                            break
+                    if entry_id is not None:
+                        break
+                if entry_id is not None:
+                    break
+        if entry_id is None:
+            entry_id = self._entry_id(entry)
         existing = self.entries.get(entry_id)
         serial = entry.get("serial")
         title = entry.get("title")
@@ -874,9 +1077,12 @@ def _normalize_output_path(
 
 def load_config(path: Optional[str]) -> Dict[str, Any]:
     if not path:
+        logger.info("No configuration file specified; using defaults")
         return {}
     if not os.path.exists(path):
+        logger.info("Configuration file '%s' not found; using defaults", path)
         return {}
+    logger.info("Loading configuration from %s", path)
     with open(path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
@@ -1048,12 +1254,13 @@ def collect_new_files(
                 if allowed_types and normalized_type not in allowed_types:
                     continue
                 file_record = state.files.get(file_url, {})
-                existing_title = ""
+                existing_title = str((file_record or {}).get("title") or "").strip()
                 already_downloaded = state.is_downloaded(file_url)
                 if already_downloaded and verify_local:
                     if not _local_file_exists(file_record.get("local_path")):
                         state.clear_downloaded(file_url)
                         already_downloaded = False
+                        existing_title = ""
                 state.merge_documents(entry_id, [document])
                 stored_entry = state.entries.get(entry_id, {})
                 doc_record = None
@@ -1078,8 +1285,6 @@ def collect_new_files(
                         state.clear_downloaded(file_url)
                         already_downloaded = False
                         existing_title = ""
-                if already_downloaded:
-                    existing_title = str((file_record or {}).get("title") or "").strip()
                 if already_downloaded:
                     if display_name and display_name != existing_title:
                         save_state(state_file, state)
@@ -1130,8 +1335,7 @@ def download_from_structure(
     entries = data.get("entries")
     if not isinstance(entries, list):
         return []
-    session = requests.Session()
-    session.headers.update(DEFAULT_HEADERS)
+    session = _create_session()
     state = load_state(state_file)
     downloaded: List[str] = []
     for entry in entries:
@@ -1155,12 +1359,13 @@ def download_from_structure(
             if allowed_types and normalized_type not in allowed_types:
                 continue
             file_record = state.files.get(file_url, {})
-            existing_title = ""
+            existing_title = str((file_record or {}).get("title") or "").strip()
             already_downloaded = state.is_downloaded(file_url)
             if already_downloaded and verify_local:
                 if not _local_file_exists(file_record.get("local_path")):
                     state.clear_downloaded(file_url)
                     already_downloaded = False
+                    existing_title = ""
             state.merge_documents(entry_id, [document])
             stored_entry = state.entries.get(entry_id, {})
             doc_record = None
@@ -1185,8 +1390,6 @@ def download_from_structure(
                     state.clear_downloaded(file_url)
                     already_downloaded = False
                     existing_title = ""
-            if already_downloaded:
-                existing_title = str((file_record or {}).get("title") or "").strip()
             if already_downloaded:
                 if display_name and display_name != existing_title:
                     save_state(state_file, state)
@@ -1228,12 +1431,13 @@ def snapshot_listing(
     timeout: float,
     page_cache_dir: Optional[str] = None,
 ) -> Dict[str, object]:
-    session = requests.Session()
-    session.headers.update(DEFAULT_HEADERS)
+    logger.info("Starting listing snapshot for %s", start_url)
+    session = _create_session()
     state = PBCState()
     pages: List[Dict[str, object]] = []
     if page_cache_dir:
         os.makedirs(page_cache_dir, exist_ok=True)
+    page_count = 0
     for page_url, soup, html_path in iterate_listing_pages(
         session,
         start_url,
@@ -1242,6 +1446,9 @@ def snapshot_listing(
         timeout,
         page_cache_dir=page_cache_dir,
     ):
+        page_count += 1
+        logger.info("Processing listing page %d: %s", page_count, page_url)
+        initial_count = len(state.entries)
         entries = extract_listing_entries(page_url, soup)
         pages.append(
             {
@@ -1255,9 +1462,23 @@ def snapshot_listing(
             documents = entry.get("documents")
             if isinstance(documents, list):
                 state.merge_documents(entry_id, documents)
+        unique_added = len(state.entries) - initial_count
+        logger.info(
+            "Page %d yielded %d entries (%d new, %d total unique)",
+            page_count,
+            len(entries),
+            unique_added if unique_added >= 0 else 0,
+            len(state.entries),
+        )
     result = state.to_jsonable()
     if pages:
         result["pages"] = pages
+    logger.info(
+        "Completed listing snapshot for %s: %d page(s), %d unique entries",
+        start_url,
+        page_count,
+        len(state.entries),
+    )
     return result
 
 
@@ -1267,13 +1488,12 @@ def fetch_listing_html(
     jitter: float,
     timeout: float,
 ) -> str:
-    session = requests.Session()
-    session.headers.update(DEFAULT_HEADERS)
+    session = _create_session()
     return _fetch(session, start_url, delay, jitter, timeout)
 
 
 def snapshot_local_file(path: str, base_url: Optional[str] = None) -> Dict[str, object]:
-    snapshot = parser_snapshot_local_file(path, base_url)
+    snapshot = _parser_snapshot_local_file(path, base_url)
     state = PBCState()
     for entry in snapshot.get("entries", []):
         entry_id = state.ensure_entry(entry)
@@ -1303,8 +1523,7 @@ def monitor_once(
     allowed_types: Optional[Set[str]] = None,
     verify_local: bool = False,
 ) -> List[str]:
-    session = requests.Session()
-    session.headers.update(DEFAULT_HEADERS)
+    session = _create_session()
     state = load_state(state_file)
     if page_cache_dir:
         os.makedirs(page_cache_dir, exist_ok=True)
@@ -1474,13 +1693,22 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     )
     args = parser.parse_args(argv)
 
+    if not logging.getLogger().handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(message)s",
+        )
+
     config = load_config(args.config)
     artifact_dir_value = _resolve_setting(args.artifact_dir, config, "artifact_dir", "artifacts")
     artifact_dir = os.path.abspath(str(artifact_dir_value))
+    logger.info("Using artifact directory: %s", artifact_dir)
 
     tasks = _build_tasks(args, config, artifact_dir)
     if not tasks:
         raise SystemExit("No tasks configured")
+
+    logger.info("Executing %d task(s)", len(tasks))
 
     for task in tasks:
         _run_task(task, args, config, artifact_dir)
