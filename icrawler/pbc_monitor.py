@@ -404,7 +404,20 @@ def _run_task(
     ) if dump_from_file_value else None
 
     start_url = str(task.start_url) if task.start_url else ""
-    output_dir = str(task.output_dir) if task.output_dir else None
+    output_value = task.output_dir if task.output_dir else None
+    if output_value:
+        output_dir = _normalize_output_path(
+            output_value,
+            artifact_dir,
+            "downloads",
+            task.name if task.from_task_list else None,
+        )
+    else:
+        if task.from_task_list:
+            default_segment = safe_filename(task.name) or "downloads"
+            output_dir = os.path.join(artifact_dir, "downloads", default_segment)
+        else:
+            output_dir = os.path.join(artifact_dir, "downloads")
 
     logger.info(
         "Starting task '%s': start_url=%s, output_dir=%s, state_file=%s",
@@ -443,6 +456,43 @@ def _run_task(
             ", ".join(sorted(allowed_types)),
         )
     logger.info("Verify local files: %s", "enabled" if verify_local else "disabled")
+
+    refresh_pages = bool(args.refresh_pages)
+    use_cached_pages_flag = bool(args.use_cached_pages) and not refresh_pages
+    prefetch_requested = bool(args.prefetch_pages)
+    if prefetch_requested:
+        if not start_url:
+            raise SystemExit("start_url must be provided to prefetch listing pages")
+        logger.info(
+            "Prefetching listing pages for task '%s' into %s",
+            task.name,
+            pages_dir,
+        )
+        page_total = prefetch_listing_pages(
+            str(start_url),
+            delay,
+            jitter,
+            timeout,
+            pages_dir,
+        )
+        logger.info(
+            "Prefetch cached %d page(s) for task '%s'",
+            page_total,
+            task.name,
+        )
+
+    followup_requested = any(
+        [
+            dump_from_file,
+            fetch_target,
+            dump_target,
+            download_target,
+            args.run_once,
+        ]
+    )
+    if prefetch_requested and not followup_requested:
+        logger.info("Prefetch completed with no additional actions requested; exiting")
+        return
 
     if not dump_from_file and not download_target and not start_url:
         raise SystemExit(f"start_url must be provided for task '{task.name}'")
@@ -501,6 +551,8 @@ def _run_task(
             jitter,
             timeout,
             page_cache_dir=pages_dir,
+            use_cache=use_cached_pages_flag,
+            refresh_cache=refresh_pages,
         )
         if dump_target == "-":
             print(json.dumps(snapshot, ensure_ascii=False, indent=2))
@@ -605,6 +657,9 @@ def iterate_listing_pages(
     jitter: float,
     timeout: float,
     page_cache_dir: Optional[str] = None,
+    *,
+    use_cache: bool = False,
+    refresh_cache: bool = False,
 ) -> Iterable[Tuple[str, BeautifulSoup, Optional[str]]]:
     queue: List[str] = [start_url]
     visited: Set[str] = set()
@@ -612,40 +667,39 @@ def iterate_listing_pages(
         url = queue.pop(0)
         if url in visited:
             continue
-        logger.info("Fetching listing page: %s", url)
-        fetch_start = time.time()
-        html = _fetch(session, url, delay, jitter, timeout)
-        duration = time.time() - fetch_start
-        logger.info(
-            "Fetched listing page: %s (%.2f seconds, %d bytes)",
-            url,
-            duration,
-            len(html),
-        )
         html_path: Optional[str] = None
+        cached_html: Optional[str] = None
         if page_cache_dir:
             os.makedirs(page_cache_dir, exist_ok=True)
-            parsed = urlparse(url)
-            components = [
-                part
-                for part in (
-                    parsed.netloc,
-                    parsed.path.strip("/") if parsed.path else "",
-                    parsed.query,
-                )
-                if part
-            ]
-            if not components:
-                components = [url]
-            filename_base = safe_filename("_".join(components))
-            if not filename_base:
-                filename_base = "page"
-            filename = f"{filename_base}.html"
-            html_path = _ensure_unique_path(page_cache_dir, filename, overwrite=True)
-            with open(html_path, "w", encoding="utf-8") as handle:
-                handle.write(html)
-            logger.info("Cached listing page %s to %s", url, html_path)
-        soup = BeautifulSoup(html, "html.parser")
+            html_path = _cache_path_for_url(page_cache_dir, url)
+            if (
+                use_cache
+                and not refresh_cache
+                and os.path.exists(html_path)
+            ):
+                with open(html_path, "r", encoding="utf-8") as handle:
+                    cached_html = handle.read()
+                logger.info("Loaded cached listing page: %s", html_path)
+
+        if cached_html is None:
+            logger.info("Fetching listing page: %s", url)
+            fetch_start = time.time()
+            html = _fetch(session, url, delay, jitter, timeout)
+            duration = time.time() - fetch_start
+            logger.info(
+                "Fetched listing page: %s (%.2f seconds, %d bytes)",
+                url,
+                duration,
+                len(html),
+            )
+            if html_path:
+                with open(html_path, "w", encoding="utf-8") as handle:
+                    handle.write(html)
+                logger.info("Cached listing page %s to %s", url, html_path)
+            html_content = html
+        else:
+            html_content = cached_html
+        soup = BeautifulSoup(html_content, "html.parser")
         yield url, soup, html_path
         visited.add(url)
         new_links: List[str] = []
@@ -1102,6 +1156,26 @@ def _ensure_unique_path(output_dir: str, filename: str, overwrite: bool = False)
     return candidate
 
 
+def _cache_path_for_url(page_cache_dir: str, url: str) -> str:
+    parsed = urlparse(url)
+    components = [
+        part
+        for part in (
+            parsed.netloc,
+            parsed.path.strip("/") if parsed.path else "",
+            parsed.query,
+        )
+        if part
+    ]
+    if not components:
+        components = [url]
+    filename_base = safe_filename("_".join(components))
+    if not filename_base:
+        filename_base = "page"
+    filename = f"{filename_base}.html"
+    return os.path.join(page_cache_dir, filename)
+
+
 EXTENSION_FALLBACK = {
     "pdf": ".pdf",
     "word": ".doc",
@@ -1424,12 +1498,51 @@ def download_from_structure(
     return downloaded
 
 
+def prefetch_listing_pages(
+    start_url: str,
+    delay: float,
+    jitter: float,
+    timeout: float,
+    page_cache_dir: str,
+) -> int:
+    logger.info("Prefetching listing pages for %s", start_url)
+    os.makedirs(page_cache_dir, exist_ok=True)
+    session = _create_session()
+    page_count = 0
+    for page_url, _, html_path in iterate_listing_pages(
+        session,
+        start_url,
+        delay,
+        jitter,
+        timeout,
+        page_cache_dir=page_cache_dir,
+        use_cache=False,
+        refresh_cache=True,
+    ):
+        page_count += 1
+        logger.info(
+            "Prefetched page %d: %s -> %s",
+            page_count,
+            page_url,
+            html_path or "(none)",
+        )
+    logger.info(
+        "Prefetch completed for %s: %d page(s) cached",
+        start_url,
+        page_count,
+    )
+    return page_count
+
+
 def snapshot_listing(
     start_url: str,
     delay: float,
     jitter: float,
     timeout: float,
     page_cache_dir: Optional[str] = None,
+    *,
+    use_cache: bool = False,
+    refresh_cache: bool = False,
 ) -> Dict[str, object]:
     logger.info("Starting listing snapshot for %s", start_url)
     session = _create_session()
@@ -1438,6 +1551,23 @@ def snapshot_listing(
     if page_cache_dir:
         os.makedirs(page_cache_dir, exist_ok=True)
     page_count = 0
+    assigned_serials: Set[str] = {
+        entry_id
+        for entry_id, entry in state.entries.items()
+        if isinstance(entry, dict) and isinstance(entry.get("serial"), int)
+    }
+    serial_counter = (
+        max(
+            (
+                entry.get("serial")
+                for entry in state.entries.values()
+                if isinstance(entry, dict) and isinstance(entry.get("serial"), int)
+            ),
+            default=0,
+        )
+        if state.entries
+        else 0
+    )
     for page_url, soup, html_path in iterate_listing_pages(
         session,
         start_url,
@@ -1445,6 +1575,8 @@ def snapshot_listing(
         jitter,
         timeout,
         page_cache_dir=page_cache_dir,
+        use_cache=use_cache,
+        refresh_cache=refresh_cache,
     ):
         page_count += 1
         logger.info("Processing listing page %d: %s", page_count, page_url)
@@ -1462,6 +1594,13 @@ def snapshot_listing(
             documents = entry.get("documents")
             if isinstance(documents, list):
                 state.merge_documents(entry_id, documents)
+            stored_entry = state.entries.get(entry_id, {})
+            current_serial = stored_entry.get("serial") if isinstance(stored_entry, dict) else None
+            if not isinstance(current_serial, int) or entry_id not in assigned_serials:
+                serial_counter += 1
+                if isinstance(stored_entry, dict):
+                    stored_entry["serial"] = serial_counter
+                assigned_serials.add(entry_id)
         unique_added = len(state.entries) - initial_count
         logger.info(
             "Page %d yielded %d entries (%d new, %d total unique)",
@@ -1675,6 +1814,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         nargs="?",
         const="page.html",
         help="download start page HTML to stdout or given file",
+    )
+    parser.add_argument(
+        "--prefetch-pages",
+        action="store_true",
+        help="cache all listing pages before parsing or downloading",
+    )
+    parser.add_argument(
+        "--refresh-pages",
+        action="store_true",
+        help="force re-downloading listing pages even if cached",
+    )
+    parser.add_argument(
+        "--use-cached-pages",
+        action="store_true",
+        help="reuse cached listing pages when available instead of fetching",
     )
     parser.add_argument(
         "--task",
