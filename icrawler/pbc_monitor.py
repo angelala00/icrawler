@@ -182,6 +182,68 @@ class TaskSpec:
     from_task_list: bool
 
 
+@dataclass
+class TaskStats:
+    pages_total: int = 0
+    pages_fetched: int = 0
+    pages_from_cache: int = 0
+    entries_seen: int = 0
+    documents_seen: int = 0
+    files_downloaded: int = 0
+    files_reused: int = 0
+
+
+def _log_task_summary(
+    task_name: str,
+    stats: Optional[TaskStats],
+    new_files: Sequence[str],
+    state: Optional[PBCState],
+    *,
+    context: str,
+) -> None:
+    stats = stats or TaskStats()
+    entries_total = 0
+    documents_total = 0
+    files_recorded = 0
+    files_marked_downloaded = 0
+    if state is not None:
+        entries_total = sum(1 for entry in state.entries.values() if isinstance(entry, dict))
+        documents_total = sum(
+            len(entry.get("documents", []))
+            for entry in state.entries.values()
+            if isinstance(entry, dict)
+        )
+        files_recorded = sum(1 for record in state.files.values() if isinstance(record, dict))
+        files_marked_downloaded = sum(
+            1
+            for record in state.files.values()
+            if isinstance(record, dict) and record.get("downloaded")
+        )
+
+    logger.info(
+        (
+            "Task '%s' summary (%s): pages=%d (fetched=%d, cached=%d); "
+            "entries=%d; documents=%d; files downloaded now=%d, reused=%d; "
+            "state files total=%d (downloaded=%d)"
+        ),
+        task_name,
+        context,
+        stats.pages_total,
+        stats.pages_fetched,
+        stats.pages_from_cache,
+        entries_total,
+        documents_total,
+        stats.files_downloaded,
+        stats.files_reused,
+        files_recorded,
+        files_marked_downloaded,
+    )
+    if new_files:
+        max_preview = 10
+        preview = ", ".join(new_files[:max_preview])
+        if len(new_files) > max_preview:
+            preview += ", ..."
+        logger.info("New files this run (%d): %s", len(new_files), preview)
 def _select_task_value(
     cli_value: Optional[Any],
     task_config: Optional[Dict[str, Any]],
@@ -386,9 +448,8 @@ def _run_task(
     )
     if isinstance(structure_value, str) and structure_value.strip():
         if structure_value == "structure.json":
-            default_structure_filename = f"{task_slug}_structure.json"
             structure_default_path = _normalize_output_path(
-                default_structure_filename,
+                "structure.json",
                 artifact_dir,
                 "structure",
                 None,
@@ -425,7 +486,12 @@ def _run_task(
     build_target = None
     if build_value:
         if build_value == "structure.json":
-            build_target = structure_default_path
+            build_target = _normalize_output_path(
+                "structure.json",
+                artifact_dir,
+                "structure",
+                None,
+            )
         else:
             build_target = _normalize_output_path(
                 build_value,
@@ -445,7 +511,12 @@ def _run_task(
     download_target = None
     if download_value:
         if download_value == "structure.json":
-            download_target = structure_default_path
+            download_target = _normalize_output_path(
+                "structure.json",
+                artifact_dir,
+                "structure",
+                None,
+            )
         else:
             download_target = _normalize_output_path(
                 download_value,
@@ -665,6 +736,12 @@ def _run_task(
             with open(str(target_path), "w", encoding="utf-8") as handle:
                 handle.write(html_content)
             logger.info("Fetched HTML saved to %s", target_path)
+            if default_fetch_requested:
+                alias_path = os.path.join(pages_dir, "page.html")
+                if alias_path != target_path:
+                    with open(alias_path, "w", encoding="utf-8") as handle:
+                        handle.write(html_content)
+                    logger.info("Start page also written to %s", alias_path)
         return
 
     if build_target:
@@ -716,15 +793,31 @@ def _run_task(
             jitter,
             timeout,
             verify_local,
+            task_name=task.name,
         )
         logger.info("Attachment download finished")
         return
+
+    monitor_use_cache = use_cached_pages_flag
+    monitor_refresh_cache = refresh_pages
+    if args.run_once:
+        use_cache_cli = bool(getattr(args, "use_cached_pages", False))
+        no_use_cache_cli = bool(getattr(args, "no_use_cached_pages", False))
+        if not refresh_pages and not use_cache_cli and not no_use_cache_cli:
+            cache_fresh = _listing_cache_is_fresh(pages_dir, str(start_url) if start_url else None)
+            if cache_fresh:
+                monitor_use_cache = True
+                monitor_refresh_cache = False
+            else:
+                monitor_use_cache = False
+                monitor_refresh_cache = False
 
     if args.run_once:
         if not start_url:
             raise SystemExit("start_url must be provided to run monitor")
         logger.info("Running single monitoring iteration for task '%s'", task.name)
-        monitor_once(
+        stats = TaskStats()
+        new_files = monitor_once(
             str(start_url),
             str(output_dir),
             state_file,
@@ -733,6 +826,17 @@ def _run_task(
             timeout,
             pages_dir,
             verify_local,
+            stats=stats,
+            use_cache=monitor_use_cache,
+            refresh_cache=monitor_refresh_cache,
+        )
+        summary_state = load_state(state_file)
+        _log_task_summary(
+            task.name,
+            stats,
+            new_files,
+            summary_state,
+            context="run-once",
         )
     else:
         if not start_url:
@@ -754,6 +858,11 @@ def _run_task(
             max_hours,
             pages_dir,
             verify_local,
+            task_name=task.name,
+            use_cache_default=use_cached_pages_flag,
+            refresh_cache_default=refresh_pages,
+            force_use_cache=bool(getattr(args, "use_cached_pages", False)),
+            force_no_use_cache=bool(getattr(args, "no_use_cached_pages", False)),
         )
 
 
@@ -788,6 +897,7 @@ def iterate_listing_pages(
     *,
     use_cache: bool = False,
     refresh_cache: bool = False,
+    stats: Optional[TaskStats] = None,
 ) -> Iterable[Tuple[str, BeautifulSoup, Optional[str]]]:
     queue: List[str] = [start_url]
     visited: Set[str] = set()
@@ -825,8 +935,16 @@ def iterate_listing_pages(
                     handle.write(html)
                 logger.info("Cached listing page %s to %s", url, html_path)
             html_content = html
+            from_cache = False
         else:
             html_content = cached_html
+            from_cache = True
+        if stats is not None:
+            stats.pages_total += 1
+            if from_cache:
+                stats.pages_from_cache += 1
+            else:
+                stats.pages_fetched += 1
         soup = BeautifulSoup(html_content, "html.parser")
         yield url, soup, html_path
         visited.add(url)
@@ -1304,6 +1422,19 @@ def _cache_path_for_url(page_cache_dir: str, url: str) -> str:
     return os.path.join(page_cache_dir, filename)
 
 
+def _listing_cache_is_fresh(
+    page_cache_dir: Optional[str],
+    start_url: Optional[str],
+) -> bool:
+    if not page_cache_dir or not start_url:
+        return False
+    cache_path = _cache_path_for_url(page_cache_dir, start_url)
+    if not os.path.exists(cache_path):
+        return False
+    mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
+    return mtime.date() == datetime.now().date()
+
+
 EXTENSION_FALLBACK = {
     "pdf": ".pdf",
     "word": ".doc",
@@ -1487,14 +1618,34 @@ def _process_documents_for_entry(
     state_file: Optional[str],
     verify_local: bool,
     downloaded: List[str],
+    allowed_types: Optional[Set[str]],
+    stats: Optional[TaskStats] = None,
 ) -> bool:
     state_changed = False
+    allowed_normalized: Optional[Set[str]] = None
+    if allowed_types is not None:
+        allowed_normalized = {value.lower() for value in allowed_types}
+    original_file_titles: Dict[str, str] = {}
+    if documents:
+        for original_doc in documents:
+            if not isinstance(original_doc, dict):
+                continue
+            original_url = original_doc.get("url")
+            if not isinstance(original_url, str) or not original_url:
+                continue
+            existing_record = state.files.get(original_url) or {}
+            original_file_titles[original_url] = str(existing_record.get("title") or "").strip()
     if documents:
         state.merge_documents(entry_id, documents)
         state_changed = True
+        if stats is not None:
+            stats.documents_seen += len(documents)
     stored_entry = state.entries.get(entry_id, {})
     entry_title = str(stored_entry.get("title") or "") if isinstance(stored_entry, dict) else ""
     doc_queue: List[Dict[str, object]] = []
+    for source_doc in documents:
+        if isinstance(source_doc, dict):
+            doc_queue.append(dict(source_doc))
     for stored_doc in stored_entry.get("documents", []) if isinstance(stored_entry, dict) else []:
         if isinstance(stored_doc, dict):
             doc_queue.append(dict(stored_doc))
@@ -1510,13 +1661,15 @@ def _process_documents_for_entry(
         force_download = bool(document.pop("__force_download", False))
         doc_type = document.get("type")
         normalized_type = (doc_type or classify_document_type(file_url)).lower()
-        document_title = document.get("title") if isinstance(document.get("title"), str) else ""
+        if allowed_normalized is not None and normalized_type not in allowed_normalized:
+            continue
+        incoming_title = str(document.get("title") or "").strip()
         clean_doc: Dict[str, object] = {
             "type": normalized_type,
             "url": file_url,
         }
-        if document_title:
-            clean_doc["title"] = document_title
+        if incoming_title:
+            clean_doc["title"] = incoming_title
         state.merge_documents(entry_id, [clean_doc])
         state_changed = True
         stored_entry = state.entries.get(entry_id, {})
@@ -1530,6 +1683,7 @@ def _process_documents_for_entry(
             continue
         file_record = state.files.get(file_url, {})
         existing_title = str((file_record or {}).get("title") or "").strip()
+        original_title = original_file_titles.get(file_url, existing_title)
         already_downloaded = state.is_downloaded(file_url)
         if already_downloaded and verify_local:
             if not _local_file_exists(file_record.get("local_path")):
@@ -1537,6 +1691,11 @@ def _process_documents_for_entry(
                 already_downloaded = False
                 existing_title = ""
         display_name = str(doc_record.get("title") or "").strip()
+        if not display_name and incoming_title:
+            display_name = incoming_title
+            if isinstance(doc_record, dict) and incoming_title:
+                doc_record["title"] = incoming_title
+                state_changed = True
 
         if not already_downloaded:
             reused_path = _locate_existing_download(file_url, normalized_type, output_dir)
@@ -1557,6 +1716,8 @@ def _process_documents_for_entry(
                 already_downloaded = True
                 state_changed = True
                 print(f"Reused existing file: {label} -> {file_url}")
+                if stats is not None:
+                    stats.files_reused += 1
 
         if normalized_type == "html":
             if already_downloaded and verify_local:
@@ -1610,7 +1771,13 @@ def _process_documents_for_entry(
                 attachment_url = attachment.get("url")
                 if not isinstance(attachment_url, str) or not attachment_url:
                     continue
+                attachment_type = attachment.get("type")
+                normalized_attachment_type = (attachment_type or classify_document_type(attachment_url)).lower()
+                if allowed_normalized is not None and normalized_attachment_type not in allowed_normalized:
+                    continue
                 state.merge_documents(entry_id, [attachment])
+                if stats is not None:
+                    stats.documents_seen += 1
                 state_changed = True
                 stored_entry = state.entries.get(entry_id, {})
                 for candidate in stored_entry.get("documents", []) if isinstance(stored_entry, dict) else []:
@@ -1641,12 +1808,14 @@ def _process_documents_for_entry(
                 already_downloaded = False
                 existing_title = ""
         if already_downloaded:
-            if display_name and display_name != existing_title:
+            if display_name and display_name != original_title:
                 state_changed = True
                 save_state(state_file, state)
                 print(f"Updated name for existing file: {display_name} -> {file_url}")
             label = display_name or existing_title or file_url
             print(f"Skipping existing file: {label} -> {file_url}")
+            if stats is not None:
+                stats.files_reused += 1
             continue
 
         try:
@@ -1672,6 +1841,8 @@ def _process_documents_for_entry(
                 save_state(state_file, state)
             print(f"Downloaded: {label} -> {file_url}")
             state_changed = True
+            if stats is not None:
+                stats.files_downloaded += 1
         except Exception as exc:
             print(f"Failed to download {file_url}: {exc}")
     return state_changed
@@ -1686,8 +1857,15 @@ def collect_new_files(
     state_file: Optional[str],
     page_cache_dir: Optional[str],
     verify_local: bool = False,
+    *,
+    allowed_types: Optional[Set[str]] = None,
+    use_cache: bool = False,
+    refresh_cache: bool = False,
+    stats: Optional[TaskStats] = None,
 ) -> List[str]:
     downloaded: List[str] = []
+    if stats is None:
+        stats = TaskStats()
     for page_url, soup, _ in iterate_listing_pages(
         session,
         start_url,
@@ -1695,8 +1873,12 @@ def collect_new_files(
         jitter,
         timeout,
         page_cache_dir=page_cache_dir,
+        use_cache=use_cache,
+        refresh_cache=refresh_cache,
+        stats=stats,
     ):
         entries = extract_listing_entries(page_url, soup)
+        stats.entries_seen += len(entries)
         for entry in entries:
             entry_id = state.ensure_entry(entry)
             documents = entry.get("documents")
@@ -1714,6 +1896,8 @@ def collect_new_files(
                 state_file,
                 verify_local,
                 downloaded,
+                allowed_types,
+                stats,
             )
             if state_dirty and state_file:
                 save_state(state_file, state)
@@ -1728,6 +1912,9 @@ def download_from_structure(
     jitter: float,
     timeout: float,
     verify_local: bool = False,
+    *,
+    task_name: Optional[str] = None,
+    allowed_types: Optional[Set[str]] = None,
 ) -> List[str]:
     with open(structure_path, "r", encoding="utf-8") as handle:
         data = json.load(handle)
@@ -1737,6 +1924,7 @@ def download_from_structure(
     session = _create_session()
     state = load_state(state_file)
     downloaded: List[str] = []
+    stats = TaskStats()
     for entry in entries:
         if not isinstance(entry, dict):
             continue
@@ -1756,10 +1944,20 @@ def download_from_structure(
             state_file,
             verify_local,
             downloaded,
+            allowed_types,
+            stats,
         )
         if state_dirty and state_file:
             save_state(state_file, state)
     save_state(state_file, state)
+    summary_state = load_state(state_file)
+    _log_task_summary(
+        task_name or structure_path,
+        stats,
+        downloaded,
+        summary_state,
+        context="download-from-structure",
+    )
     return downloaded
 
 
@@ -1933,6 +2131,11 @@ def monitor_once(
     timeout: float,
     page_cache_dir: Optional[str],
     verify_local: bool = False,
+    *,
+    allowed_types: Optional[Set[str]] = None,
+    stats: Optional[TaskStats] = None,
+    use_cache: bool = False,
+    refresh_cache: bool = False,
 ) -> List[str]:
     session = _create_session()
     state = load_state(state_file)
@@ -1949,6 +2152,10 @@ def monitor_once(
         state_file,
         page_cache_dir,
         verify_local,
+        allowed_types=allowed_types,
+        stats=stats,
+        use_cache=use_cache,
+        refresh_cache=refresh_cache,
     )
     save_state(state_file, state)
     return new_files
@@ -1973,11 +2180,37 @@ def monitor_loop(
     max_hours: float,
     page_cache_dir: Optional[str],
     verify_local: bool = False,
+    *,
+    task_name: Optional[str] = None,
+    use_cache_default: bool = True,
+    refresh_cache_default: bool = False,
+    force_use_cache: bool = False,
+    force_no_use_cache: bool = False,
+    allowed_types: Optional[Set[str]] = None,
 ) -> None:
     iteration = 0
     while True:
         iteration += 1
         print(f"[{datetime.now().isoformat(timespec='seconds')}] Iteration {iteration} start")
+        if refresh_cache_default:
+            use_cache_flag = False
+            refresh_cache_flag = True
+        elif force_use_cache:
+            use_cache_flag = True
+            refresh_cache_flag = False
+        elif force_no_use_cache:
+            use_cache_flag = False
+            refresh_cache_flag = False
+        else:
+            cache_fresh = _listing_cache_is_fresh(page_cache_dir, start_url)
+            if cache_fresh:
+                use_cache_flag = True
+                refresh_cache_flag = False
+            else:
+                use_cache_flag = False
+                refresh_cache_flag = False
+
+        iteration_stats = TaskStats()
         new_files = monitor_once(
             start_url,
             output_dir,
@@ -1987,6 +2220,18 @@ def monitor_loop(
             timeout,
             page_cache_dir,
             verify_local,
+            allowed_types=allowed_types,
+            stats=iteration_stats,
+            use_cache=use_cache_flag,
+            refresh_cache=refresh_cache_flag,
+        )
+        summary_state = load_state(state_file)
+        _log_task_summary(
+            task_name or start_url,
+            iteration_stats,
+            new_files,
+            summary_state,
+            context=f"iteration {iteration}",
         )
         if new_files:
             print(f"New files downloaded: {len(new_files)}")

@@ -50,7 +50,15 @@ Common commands (CLI flags override config fields):
 - `python -m icrawler.pbc_monitor --download-from-structure` – download
   attachments from an existing snapshot without recrawling listing pages.
 - `python -m icrawler.pbc_monitor --run-once` – single monitoring pass that
-  fetches listing pages online and downloads new attachments.
+  fetches listing pages online and downloads new attachments. If the
+  starting listing page was cached earlier the same day, the cached copy is
+  reused to avoid redundant network requests; older caches trigger a fresh
+  fetch automatically. The continuous mode (no `--run-once`) reuses the same
+  freshness rule before each iteration, so pages cached today are reused and
+  anything older is refreshed when the loop wakes up. After each run, the
+  tool logs a per-task summary that includes the number of pages processed,
+  entries/documents observed, and how many files were freshly downloaded or
+  reused from existing data.
 
 ### Typical Workflow
 

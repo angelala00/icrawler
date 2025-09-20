@@ -181,8 +181,8 @@ def test_load_config_and_main(tmp_path):
             jitter,
             timeout,
             page_cache_dir,
-            allowed_types=None,
             verify_local=False,
+            **kwargs,
         ):
             captured.update(
                 {
@@ -192,6 +192,10 @@ def test_load_config_and_main(tmp_path):
                     "delay": delay,
                     "jitter": jitter,
                     "timeout": timeout,
+                    "allowed_types": kwargs.get("allowed_types"),
+                    "use_cache": kwargs.get("use_cache"),
+                    "refresh_cache": kwargs.get("refresh_cache"),
+                        "verify_local": verify_local,
                 }
             )
             return []
@@ -234,8 +238,8 @@ def test_main_cli_overrides_config(tmp_path):
             jitter,
             timeout,
             page_cache_dir,
-            allowed_types=None,
             verify_local=False,
+            **kwargs,
         ):
             captured.update(
                 {
@@ -245,6 +249,10 @@ def test_main_cli_overrides_config(tmp_path):
                     "delay": delay,
                     "jitter": jitter,
                     "timeout": timeout,
+                    "allowed_types": kwargs.get("allowed_types"),
+                    "use_cache": kwargs.get("use_cache"),
+                    "refresh_cache": kwargs.get("refresh_cache"),
+                        "verify_local": verify_local,
                 }
             )
             return []
@@ -296,7 +304,7 @@ def test_main_dump_structure(tmp_path):
     original_iterate = pbc_monitor.iterate_listing_pages
     original_session = getattr(pbc_monitor.requests, "Session", None)
     try:
-        def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+        def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None, **kwargs):
             yield start_url, _make_soup(sample_html), None
 
         pbc_monitor.requests.Session = lambda: types.SimpleNamespace(headers={}, close=lambda: None)
@@ -666,7 +674,7 @@ def test_collect_new_files_saves_state_on_each_download():
     </body></html>
     """
 
-    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None, **kwargs):
         yield start_url, _make_soup(html), None
 
     download_calls = []
@@ -767,7 +775,7 @@ def test_collect_new_files_updates_missing_name():
     </body></html>
     """
 
-    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None, **kwargs):
         yield start_url, _make_soup(html), None
 
     original_iterate = pbc_monitor.iterate_listing_pages
@@ -853,7 +861,7 @@ def test_dump_structure_default_artifacts(tmp_path):
     original_session = getattr(pbc_monitor.requests, "Session", None)
     cwd = os.getcwd()
     try:
-        def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+        def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None, **kwargs):
             if page_cache_dir:
                 os.makedirs(page_cache_dir, exist_ok=True)
                 html_path = os.path.join(page_cache_dir, "page_001_index.html")
@@ -1047,7 +1055,7 @@ def test_collect_new_files_downloads_html_documents(tmp_path):
         }
     ]
 
-    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None, **kwargs):
         yield start_url, _make_soup("<html></html>"), None
 
     def fake_extract_listing_entries(page_url, soup):
@@ -1125,7 +1133,7 @@ def test_collect_new_files_respects_allowed_types(tmp_path):
         }
     ]
 
-    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None, **kwargs):
         yield start_url, _make_soup("<html></html>"), None
 
     def fake_extract_listing_entries(page_url, soup):
@@ -1253,7 +1261,7 @@ def test_collect_new_files_verify_local_recovers_missing(tmp_path):
         ],
     }]
 
-    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None):
+    def fake_iterate(session, start_url, delay, jitter, timeout, page_cache_dir=None, **kwargs):
         yield start_url, _make_soup("<html></html>"), None
 
     def fake_extract_listing_entries(page_url, soup):
@@ -1357,8 +1365,8 @@ def test_main_download_from_structure(tmp_path):
             delay,
             jitter,
             timeout,
-            allowed_types=None,
             verify_local=False,
+            **kwargs,
         ):
             captured.update(
                 {
@@ -1368,8 +1376,8 @@ def test_main_download_from_structure(tmp_path):
                     "delay": delay,
                     "jitter": jitter,
                     "timeout": timeout,
-                    "allowed_types": allowed_types,
-                    "verify_local": verify_local,
+                        "allowed_types": kwargs.get("allowed_types"),
+                        "verify_local": verify_local,
                 }
             )
             return []
@@ -1418,8 +1426,8 @@ def test_main_download_from_structure_verify_local(tmp_path):
             delay,
             jitter,
             timeout,
-            allowed_types=None,
             verify_local=False,
+            **kwargs,
         ):
             captured.update(
                 {
@@ -1429,8 +1437,8 @@ def test_main_download_from_structure_verify_local(tmp_path):
                     "delay": delay,
                     "jitter": jitter,
                     "timeout": timeout,
-                    "allowed_types": allowed_types,
-                    "verify_local": verify_local,
+                        "allowed_types": kwargs.get("allowed_types"),
+                        "verify_local": verify_local,
                 }
             )
             return []
