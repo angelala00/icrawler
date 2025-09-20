@@ -995,6 +995,16 @@ class PBCState:
         serialized = json.dumps(entry, ensure_ascii=False, sort_keys=True)
         return safe_filename(serialized)
 
+    def _next_serial(self) -> int:
+        highest = 0
+        for candidate in self.entries.values():
+            if not isinstance(candidate, dict):
+                continue
+            value = candidate.get("serial")
+            if isinstance(value, int) and value > highest:
+                highest = value
+        return highest + 1
+
     def ensure_entry(self, entry: Dict[str, object]) -> str:
         entry_id: Optional[str] = None
         documents = entry.get("documents")
@@ -1032,20 +1042,45 @@ class PBCState:
         serial = entry.get("serial")
         title = entry.get("title")
         remark = entry.get("remark")
-        if existing:
-            if isinstance(serial, int):
-                existing["serial"] = serial
+
+        def serial_in_use(value: int, exclude: Optional[Dict[str, object]] = None) -> bool:
+            for candidate in self.entries.values():
+                if not isinstance(candidate, dict):
+                    continue
+                if exclude is not None and candidate is exclude:
+                    continue
+                if candidate.get("serial") == value:
+                    return True
+            return False
+
+        if isinstance(existing, dict):
             if isinstance(title, str):
                 existing["title"] = title
             if isinstance(remark, str):
                 existing["remark"] = remark
-        else:
-            self.entries[entry_id] = {
-                "serial": serial if isinstance(serial, int) else None,
-                "title": title if isinstance(title, str) else "",
-                "remark": remark if isinstance(remark, str) else "",
-                "documents": [],
-            }
+            if isinstance(serial, int):
+                current_serial = existing.get("serial")
+                if not isinstance(current_serial, int):
+                    candidate = serial if serial > 0 else None
+                    if isinstance(candidate, int) and serial_in_use(candidate, exclude=existing):
+                        candidate = None
+                    if not isinstance(candidate, int):
+                        candidate = self._next_serial()
+                    existing["serial"] = candidate
+            return entry_id
+
+        assigned_serial: Optional[int] = None
+        if isinstance(serial, int) and serial > 0 and not serial_in_use(serial):
+            assigned_serial = serial
+        if not isinstance(assigned_serial, int):
+            assigned_serial = self._next_serial()
+
+        self.entries[entry_id] = {
+            "serial": assigned_serial,
+            "title": title if isinstance(title, str) else "",
+            "remark": remark if isinstance(remark, str) else "",
+            "documents": [],
+        }
         return entry_id
 
     def merge_documents(self, entry_id: str, documents: Sequence[Dict[str, object]]) -> None:

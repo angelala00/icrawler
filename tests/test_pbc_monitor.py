@@ -619,6 +619,72 @@ def test_state_roundtrip():
         assert loaded.to_jsonable() == stored
 
 
+def test_ensure_entry_preserves_and_assigns_serials():
+    state = pbc_monitor.PBCState()
+
+    existing_entry = {
+        "serial": 1,
+        "title": "公告一",
+        "remark": "",
+        "documents": [
+            {
+                "url": "http://example.com/detail.html",
+                "type": "html",
+                "title": "详情",
+            }
+        ],
+    }
+    existing_id = state.ensure_entry(existing_entry)
+    assert state.entries[existing_id]["serial"] == 1
+
+    updated_entry = {
+        "serial": 5,
+        "title": "公告一更新",
+        "remark": "已更新",
+        "documents": [
+            {
+                "url": "http://example.com/detail.html",
+                "type": "html",
+                "title": "详情最新",
+            }
+        ],
+    }
+    state.ensure_entry(updated_entry)
+    assert state.entries[existing_id]["serial"] == 1
+    assert state.entries[existing_id]["title"] == "公告一更新"
+    assert state.entries[existing_id]["remark"] == "已更新"
+
+    new_entry = {
+        "serial": 1,
+        "title": "公告二",
+        "remark": "",
+        "documents": [
+            {
+                "url": "http://example.com/another.html",
+                "type": "html",
+                "title": "详情二",
+            }
+        ],
+    }
+    new_id = state.ensure_entry(new_entry)
+    assert state.entries[new_id]["serial"] == 2
+
+    third_entry = {
+        "serial": 2,
+        "title": "公告三",
+        "remark": "",
+        "documents": [
+            {
+                "url": "http://example.com/third.html",
+                "type": "html",
+                "title": "详情三",
+            }
+        ],
+    }
+    third_id = state.ensure_entry(third_entry)
+    assert state.entries[third_id]["serial"] == 3
+
+
 def test_load_state_from_legacy_list():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_path = os.path.join(tmpdir, "state.json")

@@ -1,7 +1,7 @@
 import os
 import random
-import re
 import time
+import unicodedata
 from typing import Iterable
 
 import requests
@@ -12,9 +12,28 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency guard
     pdfkit = None
 
 
-def safe_filename(url: str) -> str:
-    """Return a filesystem-friendly version of *url*."""
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", url)
+def safe_filename(text: str) -> str:
+    """Return a filesystem-friendly version of *text* preserving Unicode letters."""
+
+    if not text:
+        return "_"
+
+    normalized = unicodedata.normalize("NFKC", text)
+    allowed_punctuation = {"-", "_"}
+    parts = []
+
+    for char in normalized:
+        if char in allowed_punctuation:
+            parts.append(char)
+            continue
+        category = unicodedata.category(char)
+        if category and category[0] in {"L", "N"}:
+            parts.append(char)
+        else:
+            parts.append("_")
+
+    sanitized = "".join(parts).strip("_")
+    return sanitized or "_"
 
 
 def download_file(url: str, output_dir: str) -> str:
