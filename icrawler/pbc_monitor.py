@@ -175,8 +175,8 @@ class TaskSpec:
     start_url: str
     output_dir: str
     state_file: Optional[str]
+    structure_file: Optional[str]
     parser_spec: Optional[str]
-    allowed_types: Optional[Set[str]]
     verify_local: bool
     raw_config: Dict[str, Any]
     from_task_list: bool
@@ -198,15 +198,11 @@ def _select_task_value(
     return default
 
 
-def _normalize_download_types(value: Optional[Any]) -> Optional[Set[str]]:
-    if value is None:
-        return None
+def _coerce_bool(value: Optional[Any]) -> bool:
     if isinstance(value, str):
-        value = [value]
-    try:
-        return {str(item).lower() for item in value}
-    except TypeError:
-        return None
+        normalized = value.strip().lower()
+        return normalized in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def _build_tasks(
@@ -222,22 +218,20 @@ def _build_tasks(
         start_url_str = str(start_url_value) if start_url_value is not None else ""
         output_dir = _select_task_value(args.output_dir, None, config, "output_dir")
         parser_spec = _select_task_value(None, None, config, "parser")
-        download_types = _normalize_download_types(
-            _select_task_value(None, None, config, "download_types")
-        )
         if args.verify_local:
             verify_local = True
         else:
             verify_local = bool(config.get("verify_local", False))
-        state_file = _select_task_value(args.state_file, None, config, "state_file", "state.json")
+        state_file = _select_task_value(args.state_file, None, config, "state_file")
+        structure_file = _select_task_value(None, None, config, "structure_file")
         name = args.task or "default"
         task = TaskSpec(
             name=name,
             start_url=start_url_str,
             output_dir=str(output_dir) if output_dir else "",
             state_file=state_file,
+            structure_file=structure_file,
             parser_spec=parser_spec,
-            allowed_types=download_types,
             verify_local=verify_local,
             raw_config={},
             from_task_list=False,
@@ -262,9 +256,6 @@ def _build_tasks(
             start_url_str = str(start_url_value) if start_url_value is not None else ""
             output_dir = _select_task_value(None, raw_task, config, "output_dir")
             parser_spec = _select_task_value(None, raw_task, config, "parser")
-            download_types = _normalize_download_types(
-                _select_task_value(None, raw_task, config, "download_types")
-            )
             task_verify = raw_task.get("verify_local")
             if args.verify_local:
                 verify_local = True
@@ -272,15 +263,16 @@ def _build_tasks(
                 verify_local = bool(task_verify)
             else:
                 verify_local = bool(config.get("verify_local", False))
-            state_file = _select_task_value(None, raw_task, config, "state_file", "state.json")
+            state_file = _select_task_value(None, raw_task, config, "state_file")
+            structure_file = _select_task_value(None, raw_task, config, "structure_file")
             task_specs.append(
                 TaskSpec(
                     name=name,
                     start_url=start_url_str,
                     output_dir=str(output_dir) if output_dir else "",
                     state_file=state_file,
+                    structure_file=structure_file,
                     parser_spec=parser_spec,
-                    allowed_types=download_types,
                     verify_local=verify_local,
                     raw_config=raw_task,
                     from_task_list=True,
@@ -301,20 +293,20 @@ def _build_tasks(
     start_url_str = str(start_url_value) if start_url_value is not None else ""
     output_dir = _select_task_value(args.output_dir, None, config, "output_dir")
     parser_spec = _select_task_value(None, None, config, "parser")
-    download_types = _normalize_download_types(config.get("download_types"))
     if args.verify_local:
         verify_local = True
     else:
         verify_local = bool(config.get("verify_local", False))
-    state_file = _select_task_value(args.state_file, None, config, "state_file", "state.json")
+    state_file = _select_task_value(args.state_file, None, config, "state_file")
+    structure_file = _select_task_value(None, None, config, "structure_file")
     name = args.task or "default"
     task = TaskSpec(
         name=name,
         start_url=start_url_str,
         output_dir=str(output_dir) if output_dir else "",
         state_file=state_file,
+        structure_file=structure_file,
         parser_spec=parser_spec,
-        allowed_types=download_types,
         verify_local=verify_local,
         raw_config=config,
         from_task_list=False,
@@ -337,73 +329,14 @@ def _run_task(
     parser_module = _load_parser_module(task.parser_spec)
     _set_parser_module(parser_module)
 
+    task_slug = safe_filename(task.name) or "task"
+
     pages_base = os.path.join(artifact_dir, "pages")
     if task.from_task_list:
         pages_dir = os.path.join(pages_base, safe_filename(task.name))
     else:
         pages_dir = pages_base
 
-    state_value = task.state_file or "state.json"
-    state_file = _normalize_output_path(
-        str(state_value),
-        artifact_dir,
-        "state",
-        task.name if task.from_task_list else None,
-    )
-
-    dump_value = _select_task_value(
-        args.dump_structure,
-        task.raw_config,
-        config,
-        "dump_structure",
-    )
-    dump_target = _normalize_output_path(
-        dump_value,
-        artifact_dir,
-        "structure",
-        task.name if task.from_task_list else None,
-    ) if dump_value else None
-
-    download_value = _select_task_value(
-        args.download_from_structure,
-        task.raw_config,
-        config,
-        "download_from_structure",
-    )
-    download_target = _normalize_output_path(
-        download_value,
-        artifact_dir,
-        "structure",
-        task.name if task.from_task_list else None,
-    ) if download_value else None
-
-    fetch_value = _select_task_value(
-        args.fetch_page,
-        task.raw_config,
-        config,
-        "fetch_page",
-    )
-    fetch_target = _normalize_output_path(
-        fetch_value,
-        artifact_dir,
-        "pages",
-        task.name if task.from_task_list else None,
-    ) if fetch_value else None
-
-    dump_from_file_value = _select_task_value(
-        args.dump_from_file,
-        task.raw_config,
-        config,
-        "dump_from_file",
-    )
-    dump_from_file = _normalize_output_path(
-        dump_from_file_value,
-        artifact_dir,
-        "pages",
-        task.name if task.from_task_list else None,
-    ) if dump_from_file_value else None
-
-    start_url = str(task.start_url) if task.start_url else ""
     output_value = task.output_dir if task.output_dir else None
     if output_value:
         output_dir = _normalize_output_path(
@@ -418,6 +351,159 @@ def _run_task(
             output_dir = os.path.join(artifact_dir, "downloads", default_segment)
         else:
             output_dir = os.path.join(artifact_dir, "downloads")
+
+    default_state_filename = f"{task_slug}_state.json"
+    default_state_dir = os.path.join(artifact_dir, "downloads")
+    default_state_path = os.path.join(default_state_dir, default_state_filename)
+    state_pref = args.state_file or task.state_file
+    state_value = _select_task_value(
+        state_pref,
+        task.raw_config,
+        config,
+        "state_file",
+        None,
+    )
+    if isinstance(state_value, str) and state_value.strip():
+        if state_value == "state.json":
+            state_file = os.path.join(default_state_dir, "state.json")
+        else:
+            state_file = _normalize_output_path(
+                state_value,
+                artifact_dir,
+                "downloads",
+                None,
+            )
+    else:
+        state_file = default_state_path
+
+    structure_pref = task.structure_file
+    structure_value = _select_task_value(
+        structure_pref,
+        task.raw_config,
+        config,
+        "structure_file",
+        None,
+    )
+    if isinstance(structure_value, str) and structure_value.strip():
+        if structure_value == "structure.json":
+            default_structure_filename = f"{task_slug}_structure.json"
+            structure_default_path = _normalize_output_path(
+                default_structure_filename,
+                artifact_dir,
+                "structure",
+                None,
+            )
+        else:
+            structure_default_path = _normalize_output_path(
+                structure_value,
+                artifact_dir,
+                "structure",
+                None,
+            )
+    else:
+        default_structure_filename = f"{task_slug}_structure.json"
+        structure_default_path = _normalize_output_path(
+            default_structure_filename,
+            artifact_dir,
+            "structure",
+            None,
+        )
+
+    build_value = _select_task_value(
+        args.build_structure,
+        task.raw_config,
+        config,
+        "build_structure",
+    )
+    if build_value is None:
+        build_value = _select_task_value(
+            None,
+            task.raw_config,
+            config,
+            "dump_structure",
+        )
+    build_target = None
+    if build_value:
+        if build_value == "structure.json":
+            build_target = structure_default_path
+        else:
+            build_target = _normalize_output_path(
+                build_value,
+                artifact_dir,
+                "structure",
+                None,
+            )
+
+    start_url = str(task.start_url) if task.start_url else ""
+
+    download_value = _select_task_value(
+        args.download_from_structure,
+        task.raw_config,
+        config,
+        "download_from_structure",
+    )
+    download_target = None
+    if download_value:
+        if download_value == "structure.json":
+            download_target = structure_default_path
+        else:
+            download_target = _normalize_output_path(
+                download_value,
+                artifact_dir,
+                "structure",
+                None,
+            )
+
+    cache_start_value = _select_task_value(
+        args.cache_start_page,
+        task.raw_config,
+        config,
+        "cache_start_page",
+    )
+    if cache_start_value is None:
+        cache_start_value = _select_task_value(
+            None,
+            task.raw_config,
+            config,
+            "fetch_page",
+        )
+    cache_start_target = _normalize_output_path(
+        cache_start_value,
+        artifact_dir,
+        "pages",
+        task.name if task.from_task_list else None,
+    ) if cache_start_value else None
+
+    preview_value = _select_task_value(
+        args.preview_page,
+        task.raw_config,
+        config,
+        "preview_page_structure",
+    )
+    if preview_value is None:
+        preview_value = _select_task_value(
+            None,
+            task.raw_config,
+            config,
+            "dump_from_file",
+        )
+    preview_target = _normalize_output_path(
+        preview_value,
+        artifact_dir,
+        "pages",
+        task.name if task.from_task_list else None,
+    ) if preview_value else None
+
+    default_preview_requested = (
+        preview_value == "page.html"
+        and isinstance(args.preview_page, str)
+        and args.preview_page == "page.html"
+        and start_url
+    )
+    if default_preview_requested:
+        cached_path = _cache_path_for_url(pages_dir, str(start_url))
+        if os.path.exists(cached_path):
+            preview_target = cached_path
 
     logger.info(
         "Starting task '%s': start_url=%s, output_dir=%s, state_file=%s",
@@ -434,7 +520,6 @@ def _run_task(
     min_hours = float(_select_task_value(args.min_hours, task.raw_config, config, "min_hours", 20.0))
     max_hours = float(_select_task_value(args.max_hours, task.raw_config, config, "max_hours", 32.0))
 
-    allowed_types = task.allowed_types
     verify_local = task.verify_local
 
     logger.info(
@@ -444,106 +529,152 @@ def _run_task(
         jitter,
         timeout,
     )
-    if not args.run_once and not dump_target and not fetch_target and not dump_from_file and not download_target:
+    if not args.run_once and not build_target and not cache_start_target and not preview_target and not download_target:
         logger.info(
             "Monitor sleep window: %.2f-%.2f hours",
             min_hours,
             max_hours,
         )
-    if allowed_types:
-        logger.info(
-            "Allowed document types: %s",
-            ", ".join(sorted(allowed_types)),
-        )
     logger.info("Verify local files: %s", "enabled" if verify_local else "disabled")
 
     refresh_pages = bool(args.refresh_pages)
-    use_cached_pages_flag = bool(args.use_cached_pages) and not refresh_pages
-    prefetch_requested = bool(args.prefetch_pages)
+    if refresh_pages:
+        use_cached_pages_flag = False
+    elif getattr(args, "use_cached_pages", False):
+        use_cached_pages_flag = True
+    elif getattr(args, "no_use_cached_pages", False):
+        use_cached_pages_flag = False
+    else:
+        use_cached_pages_flag = True
+    cache_listing_requested = _coerce_bool(getattr(args, "cache_listing", False))
+    prefetch_requested = cache_listing_requested
+    if not prefetch_requested:
+        config_cache_listing = _select_task_value(
+            None,
+            task.raw_config,
+            config,
+            "cache_listing",
+        )
+        if config_cache_listing is None:
+            config_cache_listing = _select_task_value(
+                None,
+                task.raw_config,
+                config,
+                "prefetch_pages",
+            )
+        prefetch_requested = _coerce_bool(config_cache_listing)
     if prefetch_requested:
         if not start_url:
-            raise SystemExit("start_url must be provided to prefetch listing pages")
+            raise SystemExit("start_url must be provided to cache listing pages")
         logger.info(
-            "Prefetching listing pages for task '%s' into %s",
+            "Caching listing pages for task '%s' into %s",
             task.name,
             pages_dir,
         )
-        page_total = prefetch_listing_pages(
+        page_total = cache_listing_pages(
             str(start_url),
             delay,
             jitter,
             timeout,
             pages_dir,
+            use_cache=use_cached_pages_flag,
+            refresh_cache=refresh_pages,
         )
         logger.info(
-            "Prefetch cached %d page(s) for task '%s'",
+            "Cached %d listing page(s) for task '%s'",
             page_total,
             task.name,
         )
 
     followup_requested = any(
         [
-            dump_from_file,
-            fetch_target,
-            dump_target,
+            preview_target,
+            cache_start_target,
+            build_target,
             download_target,
             args.run_once,
         ]
     )
     if prefetch_requested and not followup_requested:
-        logger.info("Prefetch completed with no additional actions requested; exiting")
+        logger.info("Caching completed with no additional actions requested; exiting")
         return
 
-    if not dump_from_file and not download_target and not start_url:
+    if not preview_target and not download_target and not start_url:
         raise SystemExit(f"start_url must be provided for task '{task.name}'")
 
     if (
-        not fetch_target
-        and not dump_target
-        and not dump_from_file
+        not cache_start_target
+        and not build_target
+        and not preview_target
         and not download_target
         and output_dir is None
     ):
         raise SystemExit(f"output_dir must be provided for task '{task.name}'")
 
-    if dump_from_file:
+    if preview_target:
         logger.info(
-            "Dumping structure for task '%s' from local file %s",
+            "Previewing cached page structure for task '%s' from %s",
             task.name,
-            dump_from_file,
+            preview_target,
         )
-        snapshot = snapshot_local_file(dump_from_file, start_url or None)
+        snapshot = snapshot_local_file(preview_target, start_url or None)
         print(json.dumps(snapshot, ensure_ascii=False, indent=2))
         return
 
-    if fetch_target:
+    if cache_start_target:
         if not start_url:
             raise SystemExit("start_url must be provided to fetch listing HTML")
-        logger.info(
-            "Fetching start page %s for task '%s' to %s",
-            start_url,
-            task.name,
-            "stdout" if fetch_target == "-" else fetch_target,
+        default_fetch_requested = (
+            cache_start_value == "page.html"
+            and isinstance(args.cache_start_page, str)
+            and args.cache_start_page == "page.html"
         )
-        html_content = fetch_listing_html(str(start_url), delay, jitter, timeout)
-        if fetch_target == "-":
+        if cache_start_target == "-":
+            logger.info(
+                "Caching start page %s for task '%s' to stdout",
+                start_url,
+                task.name,
+            )
+            html_content = fetch_listing_html(str(start_url), delay, jitter, timeout)
             print(html_content)
             logger.info("Fetched HTML written to stdout")
         else:
-            os.makedirs(os.path.dirname(fetch_target), exist_ok=True)
-            with open(str(fetch_target), "w", encoding="utf-8") as handle:
+            if default_fetch_requested:
+                target_path = _cache_path_for_url(pages_dir, str(start_url))
+            else:
+                target_path = cache_start_target
+            if (
+                os.path.exists(target_path)
+                and use_cached_pages_flag
+                and not refresh_pages
+            ):
+                logger.info(
+                    "Start page already cached for task '%s' at %s; skipping fetch",
+                    task.name,
+                    target_path,
+                )
+                return
+            logger.info(
+                "Caching start page %s for task '%s' to %s",
+                start_url,
+                task.name,
+                target_path,
+            )
+            html_content = fetch_listing_html(str(start_url), delay, jitter, timeout)
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with open(str(target_path), "w", encoding="utf-8") as handle:
                 handle.write(html_content)
-            logger.info("Fetched HTML saved to %s", fetch_target)
+            logger.info("Fetched HTML saved to %s", target_path)
         return
 
-    if dump_target:
+    if build_target:
         if not start_url:
             raise SystemExit("start_url must be provided to dump listing structure")
         logger.info(
-            "Dumping listing structure for task '%s' from %s to %s",
+            "Building listing structure for task '%s' from %s to %s",
             task.name,
             start_url,
-            "stdout" if dump_target == "-" else dump_target,
+            "stdout" if build_target == "-" else build_target,
         )
         snapshot = snapshot_listing(
             str(start_url),
@@ -554,14 +685,14 @@ def _run_task(
             use_cache=use_cached_pages_flag,
             refresh_cache=refresh_pages,
         )
-        if dump_target == "-":
+        if build_target == "-":
             print(json.dumps(snapshot, ensure_ascii=False, indent=2))
             logger.info("Listing snapshot written to stdout")
         else:
-            os.makedirs(os.path.dirname(dump_target), exist_ok=True)
-            with open(str(dump_target), "w", encoding="utf-8") as handle:
+            os.makedirs(os.path.dirname(build_target), exist_ok=True)
+            with open(str(build_target), "w", encoding="utf-8") as handle:
                 json.dump(snapshot, handle, ensure_ascii=False, indent=2)
-            logger.info("Listing snapshot saved to %s", dump_target)
+            logger.info("Listing snapshot saved to %s", build_target)
         return
 
     if download_target:
@@ -584,7 +715,6 @@ def _run_task(
             delay,
             jitter,
             timeout,
-            allowed_types,
             verify_local,
         )
         logger.info("Attachment download finished")
@@ -602,7 +732,6 @@ def _run_task(
             jitter,
             timeout,
             pages_dir,
-            allowed_types,
             verify_local,
         )
     else:
@@ -624,7 +753,6 @@ def _run_task(
             min_hours,
             max_hours,
             pages_dir,
-            allowed_types,
             verify_local,
         )
 
@@ -1228,6 +1356,29 @@ def _structured_filename(file_url: str, doc_type: Optional[str] = None) -> str:
     return f"{sanitized}{ext_out}"
 
 
+def _locate_existing_download(
+    file_url: str,
+    doc_type: Optional[str],
+    output_dir: str,
+) -> Optional[str]:
+    """Return an existing download path if the expected file is already on disk."""
+
+    candidates: List[str] = []
+    if doc_type:
+        candidates.append(_structured_filename(file_url, doc_type))
+    candidates.append(_structured_filename(file_url, None))
+
+    seen: Set[str] = set()
+    for name in candidates:
+        if name in seen:
+            continue
+        seen.add(name)
+        candidate_path = os.path.join(output_dir, name)
+        if os.path.exists(candidate_path):
+            return candidate_path
+    return None
+
+
 def download_file(
     session: requests.Session,
     file_url: str,
@@ -1286,6 +1437,244 @@ def download_document(
     )
 
 
+def _discover_detail_attachments(
+    detail_url: str, local_path: Optional[str]
+) -> List[Dict[str, object]]:
+    if not local_path or not os.path.exists(local_path):
+        return []
+    try:
+        with open(local_path, "r", encoding="utf-8") as handle:
+            html = handle.read()
+    except UnicodeDecodeError:
+        with open(local_path, "r", encoding="utf-8", errors="ignore") as handle:
+            html = handle.read()
+    soup = BeautifulSoup(html, "html.parser")
+    attachments: List[Dict[str, object]] = []
+    seen: Set[str] = set()
+    for anchor in soup.find_all("a", href=True):
+        raw_href = anchor.get("href", "").strip()
+        if not raw_href:
+            continue
+        file_url = urljoin(detail_url, raw_href)
+        doc_type = classify_document_type(file_url)
+        if doc_type == "html":
+            continue
+        if file_url in seen:
+            continue
+        seen.add(file_url)
+        title = anchor.get_text(" ", strip=True) or ""
+        if not title:
+            title = anchor.get("title") or ""
+        attachments.append(
+            {
+                "type": doc_type,
+                "url": file_url,
+                "title": title,
+            }
+        )
+    return attachments
+
+
+def _process_documents_for_entry(
+    session: requests.Session,
+    entry_id: str,
+    documents: Sequence[Dict[str, object]],
+    state: PBCState,
+    output_dir: str,
+    delay: float,
+    jitter: float,
+    timeout: float,
+    state_file: Optional[str],
+    verify_local: bool,
+    downloaded: List[str],
+) -> bool:
+    state_changed = False
+    if documents:
+        state.merge_documents(entry_id, documents)
+        state_changed = True
+    stored_entry = state.entries.get(entry_id, {})
+    entry_title = str(stored_entry.get("title") or "") if isinstance(stored_entry, dict) else ""
+    doc_queue: List[Dict[str, object]] = []
+    for stored_doc in stored_entry.get("documents", []) if isinstance(stored_entry, dict) else []:
+        if isinstance(stored_doc, dict):
+            doc_queue.append(dict(stored_doc))
+    seen_urls: Set[str] = set()
+    while doc_queue:
+        document = doc_queue.pop(0)
+        file_url = document.get("url")
+        if not isinstance(file_url, str) or not file_url:
+            continue
+        if file_url in seen_urls:
+            continue
+        seen_urls.add(file_url)
+        force_download = bool(document.pop("__force_download", False))
+        doc_type = document.get("type")
+        normalized_type = (doc_type or classify_document_type(file_url)).lower()
+        document_title = document.get("title") if isinstance(document.get("title"), str) else ""
+        clean_doc: Dict[str, object] = {
+            "type": normalized_type,
+            "url": file_url,
+        }
+        if document_title:
+            clean_doc["title"] = document_title
+        state.merge_documents(entry_id, [clean_doc])
+        state_changed = True
+        stored_entry = state.entries.get(entry_id, {})
+        entry_title = str(stored_entry.get("title") or "") if isinstance(stored_entry, dict) else entry_title
+        doc_record = None
+        for candidate in stored_entry.get("documents", []) if isinstance(stored_entry, dict) else []:
+            if isinstance(candidate, dict) and candidate.get("url") == file_url:
+                doc_record = candidate
+                break
+        if not doc_record:
+            continue
+        file_record = state.files.get(file_url, {})
+        existing_title = str((file_record or {}).get("title") or "").strip()
+        already_downloaded = state.is_downloaded(file_url)
+        if already_downloaded and verify_local:
+            if not _local_file_exists(file_record.get("local_path")):
+                state.clear_downloaded(file_url)
+                already_downloaded = False
+                existing_title = ""
+        display_name = str(doc_record.get("title") or "").strip()
+
+        if not already_downloaded:
+            reused_path = _locate_existing_download(file_url, normalized_type, output_dir)
+            if reused_path:
+                label = display_name or entry_title or file_url
+                state.mark_downloaded(
+                    entry_id,
+                    file_url,
+                    display_name or label,
+                    normalized_type,
+                    reused_path,
+                )
+                if state_file:
+                    save_state(state_file, state)
+                file_record = state.files.get(file_url, {})
+                existing_title = str((file_record or {}).get("title") or "").strip()
+                display_name = str(doc_record.get("title") or "").strip()
+                already_downloaded = True
+                state_changed = True
+                print(f"Reused existing file: {label} -> {file_url}")
+
+        if normalized_type == "html":
+            if already_downloaded and verify_local:
+                canonical_ok = _ensure_canonical_local_path(
+                    file_record,
+                    doc_record,
+                    file_url,
+                    normalized_type,
+                )
+                if not canonical_ok:
+                    state.clear_downloaded(file_url)
+                    already_downloaded = False
+                    existing_title = ""
+            local_path = (
+                file_record.get("local_path")
+                if isinstance(file_record, dict)
+                else doc_record.get("local_path")
+            )
+            if not already_downloaded:
+                try:
+                    path = download_document(
+                        session,
+                        file_url,
+                        output_dir,
+                        delay,
+                        jitter,
+                        timeout,
+                        normalized_type,
+                    )
+                    downloaded.append(path)
+                    label = display_name or entry_title or file_url
+                    state.mark_downloaded(
+                        entry_id,
+                        file_url,
+                        display_name or label,
+                        normalized_type,
+                        path,
+                    )
+                    if state_file:
+                        save_state(state_file, state)
+                    print(f"Downloaded: {label} -> {file_url}")
+                    local_path = path
+                except Exception as exc:
+                    print(f"Failed to download {file_url}: {exc}")
+                    continue
+            if isinstance(doc_record, dict) and local_path:
+                doc_record["local_path"] = local_path
+                state_changed = True
+            attachments = _discover_detail_attachments(file_url, local_path)
+            for attachment in attachments:
+                attachment_url = attachment.get("url")
+                if not isinstance(attachment_url, str) or not attachment_url:
+                    continue
+                state.merge_documents(entry_id, [attachment])
+                state_changed = True
+                stored_entry = state.entries.get(entry_id, {})
+                for candidate in stored_entry.get("documents", []) if isinstance(stored_entry, dict) else []:
+                    if (
+                        isinstance(candidate, dict)
+                        and candidate.get("url") == attachment_url
+                    ):
+                        queued = {
+                            "type": candidate.get("type"),
+                            "url": candidate.get("url"),
+                            "title": candidate.get("title"),
+                            "__force_download": True,
+                        }
+                        if queued["url"] not in seen_urls:
+                            doc_queue.append(queued)
+                        break
+            continue
+
+        if already_downloaded and verify_local:
+            canonical_ok = _ensure_canonical_local_path(
+                file_record,
+                doc_record,
+                file_url,
+                normalized_type,
+            )
+            if not canonical_ok:
+                state.clear_downloaded(file_url)
+                already_downloaded = False
+                existing_title = ""
+        if already_downloaded:
+            if display_name and display_name != existing_title:
+                state_changed = True
+                save_state(state_file, state)
+                print(f"Updated name for existing file: {display_name} -> {file_url}")
+            label = display_name or existing_title or file_url
+            print(f"Skipping existing file: {label} -> {file_url}")
+            continue
+
+        try:
+            path = download_document(
+                session,
+                file_url,
+                output_dir,
+                delay,
+                jitter,
+                timeout,
+                normalized_type,
+            )
+            downloaded.append(path)
+            label = display_name or entry_title or file_url
+            state.mark_downloaded(
+                entry_id,
+                file_url,
+                display_name or label,
+                normalized_type,
+                path,
+            )
+            if state_file:
+                save_state(state_file, state)
+            print(f"Downloaded: {label} -> {file_url}")
+            state_changed = True
+        except Exception as exc:
+            print(f"Failed to download {file_url}: {exc}")
+    return state_changed
 def collect_new_files(
     session: requests.Session,
     start_url: str,
@@ -1296,7 +1685,6 @@ def collect_new_files(
     timeout: float,
     state_file: Optional[str],
     page_cache_dir: Optional[str],
-    allowed_types: Optional[Set[str]] = None,
     verify_local: bool = False,
 ) -> List[str]:
     downloaded: List[str] = []
@@ -1314,83 +1702,21 @@ def collect_new_files(
             documents = entry.get("documents")
             if not isinstance(documents, list):
                 continue
-            for document in documents:
-                if isinstance(document, dict) and document.get("type") == "html":
-                    state.merge_documents(entry_id, [document])
-            for document in documents:
-                if not isinstance(document, dict):
-                    continue
-                file_url = document.get("url")
-                doc_type = document.get("type")
-                if not isinstance(file_url, str) or not file_url:
-                    continue
-                normalized_type = (doc_type or classify_document_type(file_url)).lower()
-                if allowed_types and normalized_type not in allowed_types:
-                    continue
-                file_record = state.files.get(file_url, {})
-                existing_title = str((file_record or {}).get("title") or "").strip()
-                already_downloaded = state.is_downloaded(file_url)
-                if already_downloaded and verify_local:
-                    if not _local_file_exists(file_record.get("local_path")):
-                        state.clear_downloaded(file_url)
-                        already_downloaded = False
-                        existing_title = ""
-                state.merge_documents(entry_id, [document])
-                stored_entry = state.entries.get(entry_id, {})
-                doc_record = None
-                for candidate in stored_entry.get("documents", []):
-                    if (
-                        isinstance(candidate, dict)
-                        and candidate.get("url") == file_url
-                    ):
-                        doc_record = candidate
-                        break
-                if not doc_record:
-                    continue
-                display_name = str(doc_record.get("title") or "").strip()
-                if already_downloaded and verify_local:
-                    canonical_ok = _ensure_canonical_local_path(
-                        file_record,
-                        doc_record,
-                        file_url,
-                        normalized_type,
-                    )
-                    if not canonical_ok:
-                        state.clear_downloaded(file_url)
-                        already_downloaded = False
-                        existing_title = ""
-                if already_downloaded:
-                    if display_name and display_name != existing_title:
-                        save_state(state_file, state)
-                        print(
-                            f"Updated name for existing file: {display_name} -> {file_url}"
-                        )
-                    label = display_name or existing_title or file_url
-                    print(f"Skipping existing file: {label} -> {file_url}")
-                    continue
-                try:
-                    path = download_document(
-                        session,
-                        file_url,
-                        output_dir,
-                        delay,
-                        jitter,
-                        timeout,
-                        normalized_type,
-                    )
-                    downloaded.append(path)
-                    label = display_name or stored_entry.get("title") or file_url
-                    state.mark_downloaded(
-                        entry_id,
-                        file_url,
-                        display_name or label,
-                        normalized_type,
-                        path,
-                    )
-                    save_state(state_file, state)
-                    print(f"Downloaded: {label} -> {file_url}")
-                except Exception as exc:
-                    print(f"Failed to download {file_url}: {exc}")
+            state_dirty = _process_documents_for_entry(
+                session,
+                entry_id,
+                documents,
+                state,
+                output_dir,
+                delay,
+                jitter,
+                timeout,
+                state_file,
+                verify_local,
+                downloaded,
+            )
+            if state_dirty and state_file:
+                save_state(state_file, state)
     return downloaded
 
 
@@ -1401,7 +1727,6 @@ def download_from_structure(
     delay: float,
     jitter: float,
     timeout: float,
-    allowed_types: Optional[Set[str]] = None,
     verify_local: bool = False,
 ) -> List[str]:
     with open(structure_path, "r", encoding="utf-8") as handle:
@@ -1419,93 +1744,41 @@ def download_from_structure(
         documents = entry.get("documents")
         if not isinstance(documents, list):
             continue
-        for document in documents:
-            if isinstance(document, dict) and document.get("type") == "html":
-                state.merge_documents(entry_id, [document])
-        for document in documents:
-            if not isinstance(document, dict):
-                continue
-            file_url = document.get("url")
-            doc_type = document.get("type")
-            if not isinstance(file_url, str) or not file_url:
-                continue
-            normalized_type = (doc_type or classify_document_type(file_url)).lower()
-            if allowed_types and normalized_type not in allowed_types:
-                continue
-            file_record = state.files.get(file_url, {})
-            existing_title = str((file_record or {}).get("title") or "").strip()
-            already_downloaded = state.is_downloaded(file_url)
-            if already_downloaded and verify_local:
-                if not _local_file_exists(file_record.get("local_path")):
-                    state.clear_downloaded(file_url)
-                    already_downloaded = False
-                    existing_title = ""
-            state.merge_documents(entry_id, [document])
-            stored_entry = state.entries.get(entry_id, {})
-            doc_record = None
-            for candidate in stored_entry.get("documents", []):
-                if (
-                    isinstance(candidate, dict)
-                    and candidate.get("url") == file_url
-                ):
-                    doc_record = candidate
-                    break
-            if not doc_record:
-                continue
-            display_name = str(doc_record.get("title") or "").strip()
-            if already_downloaded and verify_local:
-                canonical_ok = _ensure_canonical_local_path(
-                    file_record,
-                    doc_record,
-                    file_url,
-                    normalized_type,
-                )
-                if not canonical_ok:
-                    state.clear_downloaded(file_url)
-                    already_downloaded = False
-                    existing_title = ""
-            if already_downloaded:
-                if display_name and display_name != existing_title:
-                    save_state(state_file, state)
-                    print(f"Updated name for existing file: {display_name} -> {file_url}")
-                label = display_name or existing_title or file_url
-                print(f"Skipping existing file: {label} -> {file_url}")
-                continue
-            try:
-                path = download_document(
-                    session,
-                    file_url,
-                    output_dir,
-                    delay,
-                    jitter,
-                    timeout,
-                    normalized_type,
-                )
-                downloaded.append(path)
-                label = display_name or stored_entry.get("title") or file_url
-                state.mark_downloaded(
-                    entry_id,
-                    file_url,
-                    display_name or label,
-                    normalized_type,
-                    path,
-                )
-                save_state(state_file, state)
-                print(f"Downloaded: {label} -> {file_url}")
-            except Exception as exc:
-                print(f"Failed to download {file_url}: {exc}")
+        state_dirty = _process_documents_for_entry(
+            session,
+            entry_id,
+            documents,
+            state,
+            output_dir,
+            delay,
+            jitter,
+            timeout,
+            state_file,
+            verify_local,
+            downloaded,
+        )
+        if state_dirty and state_file:
+            save_state(state_file, state)
     save_state(state_file, state)
     return downloaded
 
 
-def prefetch_listing_pages(
+def cache_listing_pages(
     start_url: str,
     delay: float,
     jitter: float,
     timeout: float,
     page_cache_dir: str,
+    *,
+    use_cache: bool,
+    refresh_cache: bool,
 ) -> int:
-    logger.info("Prefetching listing pages for %s", start_url)
+    logger.info(
+        "Caching listing pages for %s (use_cache=%s, refresh=%s)",
+        start_url,
+        "yes" if use_cache and not refresh_cache else "no",
+        "yes" if refresh_cache else "no",
+    )
     os.makedirs(page_cache_dir, exist_ok=True)
     session = _create_session()
     page_count = 0
@@ -1516,18 +1789,18 @@ def prefetch_listing_pages(
         jitter,
         timeout,
         page_cache_dir=page_cache_dir,
-        use_cache=False,
-        refresh_cache=True,
+        use_cache=use_cache,
+        refresh_cache=refresh_cache,
     ):
         page_count += 1
         logger.info(
-            "Prefetched page %d: %s -> %s",
+            "Cached listing page %d: %s -> %s",
             page_count,
             page_url,
             html_path or "(none)",
         )
     logger.info(
-        "Prefetch completed for %s: %d page(s) cached",
+        "Caching completed for %s: %d page(s) cached",
         start_url,
         page_count,
     )
@@ -1659,7 +1932,6 @@ def monitor_once(
     jitter: float,
     timeout: float,
     page_cache_dir: Optional[str],
-    allowed_types: Optional[Set[str]] = None,
     verify_local: bool = False,
 ) -> List[str]:
     session = _create_session()
@@ -1676,7 +1948,6 @@ def monitor_once(
         timeout,
         state_file,
         page_cache_dir,
-        allowed_types,
         verify_local,
     )
     save_state(state_file, state)
@@ -1701,7 +1972,6 @@ def monitor_loop(
     min_hours: float,
     max_hours: float,
     page_cache_dir: Optional[str],
-    allowed_types: Optional[Set[str]] = None,
     verify_local: bool = False,
 ) -> None:
     iteration = 0
@@ -1716,7 +1986,6 @@ def monitor_loop(
             jitter,
             timeout,
             page_cache_dir,
-            allowed_types,
             verify_local,
         )
         if new_files:
@@ -1791,10 +2060,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         help="maximum hours between checks when running continuously",
     )
     parser.add_argument(
+        "--build-page-structure",
+        nargs="?",
+        const="structure.json",
+        dest="build_structure",
+        help="build full listing structure to stdout or given file",
+    )
+    parser.add_argument(
         "--dump-structure",
         nargs="?",
         const="structure.json",
-        help="dump parsed listing structure to stdout or given file",
+        dest="build_structure",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--download-from-structure",
@@ -1803,22 +2080,46 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         help="download attachments defined in a structure snapshot",
     )
     parser.add_argument(
+        "--preview-page-structure",
+        metavar="HTML",
+        nargs="?",
+        const="page.html",
+        dest="preview_page",
+        help="parse a cached HTML page and preview its structure",
+    )
+    parser.add_argument(
         "--dump-from-file",
         metavar="HTML",
         nargs="?",
         const="page.html",
-        help="parse local HTML file and dump structure to stdout",
+        dest="preview_page",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--cache-start-page",
+        nargs="?",
+        const="page.html",
+        dest="cache_start_page",
+        help="cache the start page HTML to stdout or a file",
     )
     parser.add_argument(
         "--fetch-page",
         nargs="?",
         const="page.html",
-        help="download start page HTML to stdout or given file",
+        dest="cache_start_page",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--cache-listing",
+        action="store_true",
+        dest="cache_listing",
+        help="cache all listing pages before parsing or downloading",
     )
     parser.add_argument(
         "--prefetch-pages",
         action="store_true",
-        help="cache all listing pages before parsing or downloading",
+        dest="cache_listing",
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--refresh-pages",
@@ -1829,6 +2130,11 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "--use-cached-pages",
         action="store_true",
         help="reuse cached listing pages when available instead of fetching",
+    )
+    parser.add_argument(
+        "--no-use-cached-pages",
+        action="store_true",
+        help="ignore cached listing pages and always fetch fresh copies",
     )
     parser.add_argument(
         "--task",

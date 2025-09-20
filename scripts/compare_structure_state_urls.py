@@ -1,6 +1,6 @@
 import json, pathlib
 struct = json.loads(pathlib.Path("artifacts/structure/structure.json").read_text("utf-8"))
-state = json.loads(pathlib.Path("artifacts/state/state/state.json").read_text("utf-8"))
+state = json.loads(pathlib.Path("artifacts/downloads/default_state.json").read_text("utf-8"))
 struct_urls = {doc["url"] for entry in struct["entries"] for doc in entry["documents"]}
 state_urls = {doc["url"] for entry in state["entries"] for doc in entry["documents"]}
 print("structure unique URLs:", len(struct_urls))

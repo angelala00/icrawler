@@ -302,7 +302,7 @@ def test_main_dump_structure(tmp_path):
         pbc_monitor.requests.Session = lambda: types.SimpleNamespace(headers={}, close=lambda: None)
         pbc_monitor.iterate_listing_pages = fake_iterate
         structure_path = os.path.join(tmp_path, "structure.json")
-        pbc_monitor.main(["--config", config_path, "--dump-structure", structure_path])
+        pbc_monitor.main(["--config", config_path, "--build-page-structure", structure_path])
     finally:
         pbc_monitor.iterate_listing_pages = original_iterate
         if original_session is not None:
@@ -341,7 +341,7 @@ def test_main_fetch_page(tmp_path):
     try:
         pbc_monitor.fetch_listing_html = lambda *a, **k: "<html>content</html>"
         html_path = os.path.join(tmp_path, "page.html")
-        pbc_monitor.main(["--config", config_path, "--fetch-page", html_path])
+        pbc_monitor.main(["--config", config_path, "--cache-start-page", html_path])
     finally:
         pbc_monitor.fetch_listing_html = original_fetch_html
 
@@ -365,7 +365,7 @@ def test_main_fetch_page_default_filename(tmp_path):
     try:
         pbc_monitor.fetch_listing_html = lambda *a, **k: "<html>default</html>"
         os.chdir(tmp_path)
-        pbc_monitor.main(["--config", config_path, "--fetch-page"])
+        pbc_monitor.main(["--config", config_path, "--cache-start-page"])
         default_html = os.path.join("artifacts", "pages", "page.html")
         with open(default_html, "r", encoding="utf-8") as handle:
             assert handle.read() == "<html>default</html>"
@@ -396,7 +396,7 @@ def test_main_dump_from_file(tmp_path):
     captured = []
     try:
         builtins.print = lambda *args, **kwargs: captured.append(args[0] if args else "")
-        pbc_monitor.main(["--dump-from-file", html_file])
+        pbc_monitor.main(["--preview-page-structure", html_file])
     finally:
         builtins.print = original_print
 
@@ -428,7 +428,7 @@ def test_main_dump_from_file_default(tmp_path):
     try:
         builtins.print = lambda *args, **kwargs: captured.append(args[0] if args else "")
         os.chdir(tmp_path)
-        pbc_monitor.main(["--dump-from-file"])
+        pbc_monitor.main(["--preview-page-structure"])
     finally:
         builtins.print = original_print
         os.chdir(cwd)
@@ -865,7 +865,7 @@ def test_dump_structure_default_artifacts(tmp_path):
         pbc_monitor.iterate_listing_pages = fake_iterate
         pbc_monitor.requests.Session = lambda: types.SimpleNamespace(headers={}, close=lambda: None)
         os.chdir(tmp_path)
-        pbc_monitor.main(["--config", config_path, "--dump-structure"])
+        pbc_monitor.main(["--config", config_path, "--build-page-structure"])
     finally:
         pbc_monitor.iterate_listing_pages = original_iterate
         if original_session is not None:
@@ -1381,7 +1381,7 @@ def test_main_download_from_structure(tmp_path):
 
     assert captured["structure_path"] == structure_path
     assert captured["output_dir"] == output_dir
-    expected_state = os.path.join(artifact_dir, "state", "state.json")
+    expected_state = os.path.join(artifact_dir, "downloads", "default_state.json")
     assert captured["state_file"] == expected_state
     assert captured["delay"] == 3.0
     assert captured["jitter"] == 2.0

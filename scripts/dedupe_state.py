@@ -102,7 +102,7 @@ def main() -> None:
     parser.add_argument(
         "state_file",
         nargs="?",
-        default="artifacts/state/state/state.json",
+        default="artifacts/downloads/default_state.json",
         help="Path to the state.json file (default: %(default)s)",
     )
     parser.add_argument(
