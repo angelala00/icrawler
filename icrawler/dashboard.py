@@ -320,17 +320,17 @@ def render_dashboard_html(
                 <div class="name">{name}</div>
                 <div class="url"><a href="{url}" target="_blank" rel="noopener">{url}</a></div>
               </td>
-              <td>{entries}</td>
-              <td>{documents}</td>
-              <td>{downloaded}</td>
-              <td>{pending}</td>
-              <td>{tracked}</td>
-              <td>{status}</td>
-              <td>{state_time}</td>
-              <td>{next_run}</td>
-              <td>{cache_info}</td>
-              <td>{output}</td>
-              <td>{doc_types}</td>
+              <td class="metric">{entries}</td>
+              <td class="metric">{documents}</td>
+              <td class="metric">{downloaded}</td>
+              <td class="metric">{pending}</td>
+              <td class="metric">{tracked}</td>
+              <td class="status-cell">{status}</td>
+              <td class="datetime">{state_time}</td>
+              <td class="datetime">{next_run}</td>
+              <td class="cache">{cache_info}</td>
+              <td class="output">{output}</td>
+              <td class="doc-types">{doc_types}</td>
             </tr>
             """.format(
                 name=_escape(task.name),
@@ -384,14 +384,21 @@ def render_dashboard_html(
         .summary .card {{ background: white; padding: 1rem 1.5rem; border-radius: 0.75rem; box-shadow: 0 10px 30px rgba(31, 42, 68, 0.12); min-width: 120px; }}
         .summary .label {{ font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7a90; margin-bottom: 0.5rem; }}
         .summary .value {{ font-size: 1.5rem; font-weight: 600; }}
-        table {{ width: 100%; border-collapse: collapse; background: white; border-radius: 0.75rem; overflow: hidden; box-shadow: 0 20px 40px rgba(31, 42, 68, 0.1); }}
+        .table-wrapper {{ width: 100%; overflow-x: auto; }}
+        table {{ width: 100%; border-collapse: collapse; background: white; border-radius: 0.75rem; overflow: hidden; box-shadow: 0 20px 40px rgba(31, 42, 68, 0.1); min-width: 960px; }}
         thead {{ background: #f0f4ff; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem; color: #55627a; }}
-        th {{ padding: 0.75rem 1rem; text-align: left; }}
-        td {{ padding: 0.75rem 1rem; border-top: 1px solid #e3e8f2; vertical-align: top; }}
+        th {{ padding: 0.75rem 1rem; text-align: left; white-space: nowrap; }}
+        td {{ padding: 0.75rem 1rem; border-top: 1px solid #e3e8f2; vertical-align: top; word-break: break-word; overflow-wrap: anywhere; }}
         tr:hover {{ background: #f8faff; }}
+        .task-name {{ max-width: 18rem; }}
         .task-name .name {{ font-weight: 600; margin-bottom: 0.3rem; }}
-        .task-name .url a {{ color: #2563eb; text-decoration: none; font-size: 0.85rem; }}
+        .task-name .url {{ font-size: 0.85rem; color: #2563eb; }}
+        .task-name .url a {{ color: inherit; text-decoration: none; word-break: break-all; display: inline-block; }}
         .task-name .url a:hover {{ text-decoration: underline; }}
+        td.metric {{ white-space: nowrap; font-variant-numeric: tabular-nums; }}
+        td.status-cell {{ min-width: 9rem; }}
+        td.datetime {{ min-width: 11rem; white-space: normal; }}
+        td.cache, td.output, td.doc-types {{ max-width: 16rem; white-space: normal; }}
         .status-ok {{ color: #059669; font-weight: 600; }}
         .status-attention {{ color: #d97706; font-weight: 600; }}
         .status-waiting {{ color: #6b7280; font-weight: 600; }}
