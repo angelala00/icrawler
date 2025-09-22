@@ -1,3 +1,3 @@
 """Simple web crawler package."""
 
-__all__ = ["crawler"]
+__all__ = ["crawler", "dashboard"]

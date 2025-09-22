@@ -92,6 +92,28 @@ State tracking and structure snapshots also adopt per-task defaults:
 You can override these via config (`state_file` / `structure_file`) or CLI
 (`--state-file`, `--build-page-structure`, `--download-from-structure`).
 
+### Monitoring Dashboard
+
+Run the lightweight dashboard to visualise the status of every configured task:
+
+```
+python -m icrawler.dashboard --config pbc_config.json
+```
+
+The page shows, for each task, the number of entries/documents tracked,
+download progress, cached listing freshness, last update time, and the next
+scheduled monitoring window. It refreshes automatically (default 30 seconds)
+and also exposes a JSON API at `/api/tasks` for automation or custom widgets.
+
+Useful flags:
+
+- `--port` / `--host` – bind address for the web UI (default `0.0.0.0:8000`).
+- `--refresh` – change the auto-refresh interval (set to `0` to disable).
+- `--once` – render the HTML dashboard once to stdout, handy for static
+  snapshots.
+- `--json` – emit the current statistics as JSON and exit.
+- `--task <name>` – focus on a single configured task.
+
 ### Artifacts
 
 All generated files live under `artifact_dir` (default `./artifacts`):

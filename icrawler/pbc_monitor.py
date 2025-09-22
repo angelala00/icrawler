@@ -21,7 +21,7 @@ from .fetcher import DEFAULT_HEADERS, sleep_with_jitter
 from .parser import classify_document_type as _default_classify_document_type
 from .task_models import TaskStats
 from .summary import log_task_summary
-from .state import PBCState, load_state, save_state
+from .state import ClassifierFn, PBCState, load_state as _load_state, save_state
 
 
 logger = logging.getLogger(__name__)
@@ -1202,6 +1202,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     runner_main(argv)
 
 
+
+def load_state(
+    state_file: Optional[str],
+    classifier: Optional[ClassifierFn] = None,
+) -> PBCState:
+    """Load state data, defaulting to the active parser's classifier."""
+
+    classifier = classifier or classify_document_type
+    return _load_state(state_file, classifier)
 
 
 if __name__ == "__main__":
