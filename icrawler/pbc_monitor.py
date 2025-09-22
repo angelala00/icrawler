@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import argparse
 import importlib
 import json
 import logging
 import os
 import random
 import time
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -18,8 +16,12 @@ import requests
 from bs4 import BeautifulSoup
 
 from .crawler import safe_filename
-from .fetcher import DEFAULT_HEADERS, get as http_get, sleep_with_jitter
+from .fetching import build_cache_path_for_url, create_session, fetch
+from .fetcher import DEFAULT_HEADERS, sleep_with_jitter
 from .parser import classify_document_type as _default_classify_document_type
+from .task_models import TaskStats
+from .summary import log_task_summary
+from .state import PBCState, load_state, save_state
 
 
 logger = logging.getLogger(__name__)
@@ -29,32 +31,7 @@ _current_parser_module: ModuleType = importlib.import_module(DEFAULT_PARSER_SPEC
 
 
 def _create_session() -> requests.Session:
-    """Return a requests-like session with default headers applied."""
-
-    session_factory = getattr(requests, "Session", None)
-    session: Optional[requests.Session]
-    if callable(session_factory):
-        try:
-            session = session_factory()
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.debug("Failed to create requests session: %s", exc)
-            session = None
-    else:
-        session = None
-
-    if session is None:
-        logger.debug("Falling back to simple session stub")
-        session = SimpleNamespace(headers={}, close=lambda: None)
-        get_callable = getattr(requests, "get", None)
-        if callable(get_callable):
-            setattr(session, "get", get_callable)
-
-    headers = getattr(session, "headers", None)
-    if isinstance(headers, dict):
-        headers.update(DEFAULT_HEADERS)
-    else:
-        setattr(session, "headers", dict(DEFAULT_HEADERS))
-    return session  # type: ignore[return-value]
+    return create_session()
 
 
 def _load_parser_module(spec: Optional[str]) -> ModuleType:
@@ -169,81 +146,6 @@ def classify_document_type(url: str) -> str:
     return _default_classify_document_type(url)
 
 
-@dataclass
-class TaskSpec:
-    name: str
-    start_url: str
-    output_dir: str
-    state_file: Optional[str]
-    structure_file: Optional[str]
-    parser_spec: Optional[str]
-    verify_local: bool
-    raw_config: Dict[str, Any]
-    from_task_list: bool
-
-
-@dataclass
-class TaskStats:
-    pages_total: int = 0
-    pages_fetched: int = 0
-    pages_from_cache: int = 0
-    entries_seen: int = 0
-    documents_seen: int = 0
-    files_downloaded: int = 0
-    files_reused: int = 0
-
-
-def _log_task_summary(
-    task_name: str,
-    stats: Optional[TaskStats],
-    new_files: Sequence[str],
-    state: Optional[PBCState],
-    *,
-    context: str,
-) -> None:
-    stats = stats or TaskStats()
-    entries_total = 0
-    documents_total = 0
-    files_recorded = 0
-    files_marked_downloaded = 0
-    if state is not None:
-        entries_total = sum(1 for entry in state.entries.values() if isinstance(entry, dict))
-        documents_total = sum(
-            len(entry.get("documents", []))
-            for entry in state.entries.values()
-            if isinstance(entry, dict)
-        )
-        files_recorded = sum(1 for record in state.files.values() if isinstance(record, dict))
-        files_marked_downloaded = sum(
-            1
-            for record in state.files.values()
-            if isinstance(record, dict) and record.get("downloaded")
-        )
-
-    logger.info(
-        (
-            "Task '%s' summary (%s): pages=%d (fetched=%d, cached=%d); "
-            "entries=%d; documents=%d; files downloaded now=%d, reused=%d; "
-            "state files total=%d (downloaded=%d)"
-        ),
-        task_name,
-        context,
-        stats.pages_total,
-        stats.pages_fetched,
-        stats.pages_from_cache,
-        entries_total,
-        documents_total,
-        stats.files_downloaded,
-        stats.files_reused,
-        files_recorded,
-        files_marked_downloaded,
-    )
-    if new_files:
-        max_preview = 10
-        preview = ", ".join(new_files[:max_preview])
-        if len(new_files) > max_preview:
-            preview += ", ..."
-        logger.info("New files this run (%d): %s", len(new_files), preview)
 def _select_task_value(
     cli_value: Optional[Any],
     task_config: Optional[Dict[str, Any]],
@@ -267,603 +169,6 @@ def _coerce_bool(value: Optional[Any]) -> bool:
     return bool(value)
 
 
-def _build_tasks(
-    args: argparse.Namespace,
-    config: Dict[str, Any],
-    artifact_dir: str,
-) -> List[TaskSpec]:
-    tasks_config = config.get("tasks")
-
-    # If CLI positional overrides are provided, treat as single ad-hoc task.
-    if args.start_url or args.output_dir:
-        start_url_value = _select_task_value(args.start_url, None, config, "start_url")
-        start_url_str = str(start_url_value) if start_url_value is not None else ""
-        output_dir = _select_task_value(args.output_dir, None, config, "output_dir")
-        parser_spec = _select_task_value(None, None, config, "parser")
-        if args.verify_local:
-            verify_local = True
-        else:
-            verify_local = bool(config.get("verify_local", False))
-        state_file = _select_task_value(args.state_file, None, config, "state_file")
-        structure_file = _select_task_value(None, None, config, "structure_file")
-        name = args.task or "default"
-        task = TaskSpec(
-            name=name,
-            start_url=start_url_str,
-            output_dir=str(output_dir) if output_dir else "",
-            state_file=state_file,
-            structure_file=structure_file,
-            parser_spec=parser_spec,
-            verify_local=verify_local,
-            raw_config={},
-            from_task_list=False,
-        )
-        logger.info(
-            "Prepared CLI override task '%s' with start URL %s",
-            task.name,
-            task.start_url,
-        )
-        return [task]
-
-    task_specs: List[TaskSpec] = []
-
-    if isinstance(tasks_config, list) and tasks_config:
-        for index, raw_task in enumerate(tasks_config):
-            if not isinstance(raw_task, dict):
-                continue
-            name = str(raw_task.get("name") or f"task{index + 1}")
-            if args.task and args.task != name:
-                continue
-            start_url_value = _select_task_value(None, raw_task, config, "start_url")
-            start_url_str = str(start_url_value) if start_url_value is not None else ""
-            output_dir = _select_task_value(None, raw_task, config, "output_dir")
-            parser_spec = _select_task_value(None, raw_task, config, "parser")
-            task_verify = raw_task.get("verify_local")
-            if args.verify_local:
-                verify_local = True
-            elif task_verify is not None:
-                verify_local = bool(task_verify)
-            else:
-                verify_local = bool(config.get("verify_local", False))
-            state_file = _select_task_value(None, raw_task, config, "state_file")
-            structure_file = _select_task_value(None, raw_task, config, "structure_file")
-            task_specs.append(
-                TaskSpec(
-                    name=name,
-                    start_url=start_url_str,
-                    output_dir=str(output_dir) if output_dir else "",
-                    state_file=state_file,
-                    structure_file=structure_file,
-                    parser_spec=parser_spec,
-                    verify_local=verify_local,
-                    raw_config=raw_task,
-                    from_task_list=True,
-                )
-            )
-        if args.task and not task_specs:
-            raise SystemExit(f"Task '{args.task}' not found in configuration")
-        if task_specs:
-            logger.info(
-                "Prepared %d configured task(s): %s",
-                len(task_specs),
-                ", ".join(spec.name for spec in task_specs),
-            )
-            return task_specs
-
-    # Fallback to single-task configuration.
-    start_url_value = _select_task_value(args.start_url, None, config, "start_url")
-    start_url_str = str(start_url_value) if start_url_value is not None else ""
-    output_dir = _select_task_value(args.output_dir, None, config, "output_dir")
-    parser_spec = _select_task_value(None, None, config, "parser")
-    if args.verify_local:
-        verify_local = True
-    else:
-        verify_local = bool(config.get("verify_local", False))
-    state_file = _select_task_value(args.state_file, None, config, "state_file")
-    structure_file = _select_task_value(None, None, config, "structure_file")
-    name = args.task or "default"
-    task = TaskSpec(
-        name=name,
-        start_url=start_url_str,
-        output_dir=str(output_dir) if output_dir else "",
-        state_file=state_file,
-        structure_file=structure_file,
-        parser_spec=parser_spec,
-        verify_local=verify_local,
-        raw_config=config,
-        from_task_list=False,
-    )
-    logger.info(
-        "Prepared default task '%s' with start URL %s",
-        task.name,
-        task.start_url,
-    )
-    return [task]
-
-
-def _run_task(
-    task: TaskSpec,
-    args: argparse.Namespace,
-    config: Dict[str, Any],
-    artifact_dir: str,
-) -> None:
-
-    parser_module = _load_parser_module(task.parser_spec)
-    _set_parser_module(parser_module)
-
-    task_slug = safe_filename(task.name) or "task"
-
-    pages_base = os.path.join(artifact_dir, "pages")
-    if task.from_task_list:
-        pages_dir = os.path.join(pages_base, safe_filename(task.name))
-    else:
-        pages_dir = pages_base
-
-    output_value = task.output_dir if task.output_dir else None
-    if output_value:
-        output_dir = _normalize_output_path(
-            output_value,
-            artifact_dir,
-            "downloads",
-            task.name if task.from_task_list else None,
-        )
-    else:
-        if task.from_task_list:
-            default_segment = safe_filename(task.name) or "downloads"
-            output_dir = os.path.join(artifact_dir, "downloads", default_segment)
-        else:
-            output_dir = os.path.join(artifact_dir, "downloads")
-
-    default_state_filename = f"{task_slug}_state.json"
-    default_state_dir = os.path.join(artifact_dir, "downloads")
-    default_state_path = os.path.join(default_state_dir, default_state_filename)
-    state_pref = args.state_file or task.state_file
-    state_value = _select_task_value(
-        state_pref,
-        task.raw_config,
-        config,
-        "state_file",
-        None,
-    )
-    if isinstance(state_value, str) and state_value.strip():
-        if state_value == "state.json":
-            state_file = os.path.join(default_state_dir, "state.json")
-        else:
-            state_file = _normalize_output_path(
-                state_value,
-                artifact_dir,
-                "downloads",
-                None,
-            )
-    else:
-        state_file = default_state_path
-
-    structure_pref = task.structure_file
-    structure_value = _select_task_value(
-        structure_pref,
-        task.raw_config,
-        config,
-        "structure_file",
-        None,
-    )
-    if isinstance(structure_value, str) and structure_value.strip():
-        if structure_value == "structure.json":
-            structure_default_path = _normalize_output_path(
-                "structure.json",
-                artifact_dir,
-                "structure",
-                None,
-            )
-        else:
-            structure_default_path = _normalize_output_path(
-                structure_value,
-                artifact_dir,
-                "structure",
-                None,
-            )
-    else:
-        default_structure_filename = f"{task_slug}_structure.json"
-        structure_default_path = _normalize_output_path(
-            default_structure_filename,
-            artifact_dir,
-            "structure",
-            None,
-        )
-
-    build_value = _select_task_value(
-        args.build_structure,
-        task.raw_config,
-        config,
-        "build_structure",
-    )
-    if build_value is None:
-        build_value = _select_task_value(
-            None,
-            task.raw_config,
-            config,
-            "dump_structure",
-        )
-    build_target = None
-    if build_value:
-        if build_value == "structure.json":
-            build_target = _normalize_output_path(
-                "structure.json",
-                artifact_dir,
-                "structure",
-                None,
-            )
-        else:
-            build_target = _normalize_output_path(
-                build_value,
-                artifact_dir,
-                "structure",
-                None,
-            )
-
-    start_url = str(task.start_url) if task.start_url else ""
-
-    download_value = _select_task_value(
-        args.download_from_structure,
-        task.raw_config,
-        config,
-        "download_from_structure",
-    )
-    download_target = None
-    if download_value:
-        if download_value == "structure.json":
-            download_target = _normalize_output_path(
-                "structure.json",
-                artifact_dir,
-                "structure",
-                None,
-            )
-        else:
-            download_target = _normalize_output_path(
-                download_value,
-                artifact_dir,
-                "structure",
-                None,
-            )
-
-    cache_start_value = _select_task_value(
-        args.cache_start_page,
-        task.raw_config,
-        config,
-        "cache_start_page",
-    )
-    if cache_start_value is None:
-        cache_start_value = _select_task_value(
-            None,
-            task.raw_config,
-            config,
-            "fetch_page",
-        )
-    cache_start_target = _normalize_output_path(
-        cache_start_value,
-        artifact_dir,
-        "pages",
-        task.name if task.from_task_list else None,
-    ) if cache_start_value else None
-
-    preview_value = _select_task_value(
-        args.preview_page,
-        task.raw_config,
-        config,
-        "preview_page_structure",
-    )
-    if preview_value is None:
-        preview_value = _select_task_value(
-            None,
-            task.raw_config,
-            config,
-            "dump_from_file",
-        )
-    preview_target = _normalize_output_path(
-        preview_value,
-        artifact_dir,
-        "pages",
-        task.name if task.from_task_list else None,
-    ) if preview_value else None
-
-    default_preview_requested = (
-        preview_value == "page.html"
-        and isinstance(args.preview_page, str)
-        and args.preview_page == "page.html"
-        and start_url
-    )
-    if default_preview_requested:
-        cached_path = _cache_path_for_url(pages_dir, str(start_url))
-        if os.path.exists(cached_path):
-            preview_target = cached_path
-
-    logger.info(
-        "Starting task '%s': start_url=%s, output_dir=%s, state_file=%s",
-        task.name,
-        start_url or "(none)",
-        output_dir or "(none)",
-        state_file or "(none)",
-    )
-    logger.info("Using page cache directory: %s", pages_dir)
-
-    delay = float(_select_task_value(args.delay, task.raw_config, config, "delay", 3.0))
-    jitter = float(_select_task_value(args.jitter, task.raw_config, config, "jitter", 2.0))
-    timeout = float(_select_task_value(args.timeout, task.raw_config, config, "timeout", 30.0))
-    min_hours = float(_select_task_value(args.min_hours, task.raw_config, config, "min_hours", 20.0))
-    max_hours = float(_select_task_value(args.max_hours, task.raw_config, config, "max_hours", 32.0))
-
-    verify_local = task.verify_local
-
-    logger.info(
-        "HTTP options for task '%s': delay=%.2fs, jitter=%.2fs, timeout=%.2fs",
-        task.name,
-        delay,
-        jitter,
-        timeout,
-    )
-    if not args.run_once and not build_target and not cache_start_target and not preview_target and not download_target:
-        logger.info(
-            "Monitor sleep window: %.2f-%.2f hours",
-            min_hours,
-            max_hours,
-        )
-    logger.info("Verify local files: %s", "enabled" if verify_local else "disabled")
-
-    refresh_pages = bool(args.refresh_pages)
-    if refresh_pages:
-        use_cached_pages_flag = False
-    elif getattr(args, "use_cached_pages", False):
-        use_cached_pages_flag = True
-    elif getattr(args, "no_use_cached_pages", False):
-        use_cached_pages_flag = False
-    else:
-        use_cached_pages_flag = True
-    cache_listing_requested = _coerce_bool(getattr(args, "cache_listing", False))
-    prefetch_requested = cache_listing_requested
-    if not prefetch_requested:
-        config_cache_listing = _select_task_value(
-            None,
-            task.raw_config,
-            config,
-            "cache_listing",
-        )
-        if config_cache_listing is None:
-            config_cache_listing = _select_task_value(
-                None,
-                task.raw_config,
-                config,
-                "prefetch_pages",
-            )
-        prefetch_requested = _coerce_bool(config_cache_listing)
-    if prefetch_requested:
-        if not start_url:
-            raise SystemExit("start_url must be provided to cache listing pages")
-        logger.info(
-            "Caching listing pages for task '%s' into %s",
-            task.name,
-            pages_dir,
-        )
-        page_total = cache_listing_pages(
-            str(start_url),
-            delay,
-            jitter,
-            timeout,
-            pages_dir,
-            use_cache=use_cached_pages_flag,
-            refresh_cache=refresh_pages,
-        )
-        logger.info(
-            "Cached %d listing page(s) for task '%s'",
-            page_total,
-            task.name,
-        )
-
-    followup_requested = any(
-        [
-            preview_target,
-            cache_start_target,
-            build_target,
-            download_target,
-            args.run_once,
-        ]
-    )
-    if prefetch_requested and not followup_requested:
-        logger.info("Caching completed with no additional actions requested; exiting")
-        return
-
-    if not preview_target and not download_target and not start_url:
-        raise SystemExit(f"start_url must be provided for task '{task.name}'")
-
-    if (
-        not cache_start_target
-        and not build_target
-        and not preview_target
-        and not download_target
-        and output_dir is None
-    ):
-        raise SystemExit(f"output_dir must be provided for task '{task.name}'")
-
-    if preview_target:
-        logger.info(
-            "Previewing cached page structure for task '%s' from %s",
-            task.name,
-            preview_target,
-        )
-        snapshot = snapshot_local_file(preview_target, start_url or None)
-        print(json.dumps(snapshot, ensure_ascii=False, indent=2))
-        return
-
-    if cache_start_target:
-        if not start_url:
-            raise SystemExit("start_url must be provided to fetch listing HTML")
-        default_fetch_requested = (
-            cache_start_value == "page.html"
-            and isinstance(args.cache_start_page, str)
-            and args.cache_start_page == "page.html"
-        )
-        if cache_start_target == "-":
-            logger.info(
-                "Caching start page %s for task '%s' to stdout",
-                start_url,
-                task.name,
-            )
-            html_content = fetch_listing_html(str(start_url), delay, jitter, timeout)
-            print(html_content)
-            logger.info("Fetched HTML written to stdout")
-        else:
-            if default_fetch_requested:
-                target_path = _cache_path_for_url(pages_dir, str(start_url))
-            else:
-                target_path = cache_start_target
-            if (
-                os.path.exists(target_path)
-                and use_cached_pages_flag
-                and not refresh_pages
-            ):
-                logger.info(
-                    "Start page already cached for task '%s' at %s; skipping fetch",
-                    task.name,
-                    target_path,
-                )
-                return
-            logger.info(
-                "Caching start page %s for task '%s' to %s",
-                start_url,
-                task.name,
-                target_path,
-            )
-            html_content = fetch_listing_html(str(start_url), delay, jitter, timeout)
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-            with open(str(target_path), "w", encoding="utf-8") as handle:
-                handle.write(html_content)
-            logger.info("Fetched HTML saved to %s", target_path)
-            if default_fetch_requested:
-                alias_path = os.path.join(pages_dir, "page.html")
-                if alias_path != target_path:
-                    with open(alias_path, "w", encoding="utf-8") as handle:
-                        handle.write(html_content)
-                    logger.info("Start page also written to %s", alias_path)
-        return
-
-    if build_target:
-        if not start_url:
-            raise SystemExit("start_url must be provided to dump listing structure")
-        logger.info(
-            "Building listing structure for task '%s' from %s to %s",
-            task.name,
-            start_url,
-            "stdout" if build_target == "-" else build_target,
-        )
-        snapshot = snapshot_listing(
-            str(start_url),
-            delay,
-            jitter,
-            timeout,
-            page_cache_dir=pages_dir,
-            use_cache=use_cached_pages_flag,
-            refresh_cache=refresh_pages,
-        )
-        if build_target == "-":
-            print(json.dumps(snapshot, ensure_ascii=False, indent=2))
-            logger.info("Listing snapshot written to stdout")
-        else:
-            os.makedirs(os.path.dirname(build_target), exist_ok=True)
-            with open(str(build_target), "w", encoding="utf-8") as handle:
-                json.dump(snapshot, handle, ensure_ascii=False, indent=2)
-            logger.info("Listing snapshot saved to %s", build_target)
-        return
-
-    if download_target:
-        if download_target == "-":
-            raise SystemExit("--download-from-structure does not support '-' as input")
-        if not os.path.exists(download_target):
-            raise SystemExit(f"Structure file not found: {download_target}")
-        if output_dir is None:
-            raise SystemExit("output_dir must be provided to download attachments")
-        logger.info(
-            "Downloading attachments for task '%s' from %s into %s",
-            task.name,
-            download_target,
-            output_dir,
-        )
-        download_from_structure(
-            download_target,
-            str(output_dir),
-            state_file,
-            delay,
-            jitter,
-            timeout,
-            verify_local,
-            task_name=task.name,
-        )
-        logger.info("Attachment download finished")
-        return
-
-    monitor_use_cache = use_cached_pages_flag
-    monitor_refresh_cache = refresh_pages
-    if args.run_once:
-        use_cache_cli = bool(getattr(args, "use_cached_pages", False))
-        no_use_cache_cli = bool(getattr(args, "no_use_cached_pages", False))
-        if not refresh_pages and not use_cache_cli and not no_use_cache_cli:
-            cache_fresh = _listing_cache_is_fresh(pages_dir, str(start_url) if start_url else None)
-            if cache_fresh:
-                monitor_use_cache = True
-                monitor_refresh_cache = False
-            else:
-                monitor_use_cache = False
-                monitor_refresh_cache = False
-
-    if args.run_once:
-        if not start_url:
-            raise SystemExit("start_url must be provided to run monitor")
-        logger.info("Running single monitoring iteration for task '%s'", task.name)
-        stats = TaskStats()
-        new_files = monitor_once(
-            str(start_url),
-            str(output_dir),
-            state_file,
-            delay,
-            jitter,
-            timeout,
-            pages_dir,
-            verify_local,
-            stats=stats,
-            use_cache=monitor_use_cache,
-            refresh_cache=monitor_refresh_cache,
-        )
-        summary_state = load_state(state_file)
-        _log_task_summary(
-            task.name,
-            stats,
-            new_files,
-            summary_state,
-            context="run-once",
-        )
-    else:
-        if not start_url:
-            raise SystemExit("start_url must be provided to run monitor")
-        logger.info(
-            "Entering monitoring loop for task '%s' with sleep window %.2f-%.2f hours",
-            task.name,
-            min_hours,
-            max_hours,
-        )
-        monitor_loop(
-            str(start_url),
-            str(output_dir),
-            state_file,
-            delay,
-            jitter,
-            timeout,
-            min_hours,
-            max_hours,
-            pages_dir,
-            verify_local,
-            task_name=task.name,
-            use_cache_default=use_cached_pages_flag,
-            refresh_cache_default=refresh_pages,
-            force_use_cache=bool(getattr(args, "use_cached_pages", False)),
-            force_no_use_cache=bool(getattr(args, "no_use_cached_pages", False)),
-        )
 
 
 def _fetch(
@@ -873,14 +178,7 @@ def _fetch(
     jitter: float,
     timeout: float,
 ) -> str:
-    response = http_get(
-        url,
-        session=session,
-        delay=delay,
-        jitter=jitter,
-        timeout=timeout,
-    )
-    return response.text
+    return fetch(session, url, delay, jitter, timeout)
 
 
 def _sleep(delay: float, jitter: float) -> None:
@@ -909,7 +207,7 @@ def iterate_listing_pages(
         cached_html: Optional[str] = None
         if page_cache_dir:
             os.makedirs(page_cache_dir, exist_ok=True)
-            html_path = _cache_path_for_url(page_cache_dir, url)
+            html_path = build_cache_path_for_url(page_cache_dir, url)
             if (
                 use_cache
                 and not refresh_cache
@@ -961,390 +259,6 @@ def iterate_listing_pages(
             )
             logger.info("Pagination queue size is now %d", len(queue))
 
-class PBCState:
-    def __init__(self) -> None:
-        self.entries: Dict[str, Dict[str, object]] = {}
-        self.files: Dict[str, Dict[str, object]] = {}
-
-    def _entry_id(self, entry: Dict[str, object]) -> str:
-        documents = entry.get("documents") or []
-        if isinstance(documents, list):
-            for document in documents:
-                if not isinstance(document, dict):
-                    continue
-                url_value = document.get("url")
-                doc_type = document.get("type")
-                if isinstance(url_value, str) and doc_type == "html":
-                    return url_value
-            for document in documents:
-                if not isinstance(document, dict):
-                    continue
-                url_value = document.get("url")
-                if isinstance(url_value, str) and url_value:
-                    return url_value
-        title = entry.get("title")
-        remark = entry.get("remark")
-        if isinstance(title, str) and title:
-            key = f"title::{title}"
-            if isinstance(remark, str) and remark:
-                key = f"{key}::{remark}"
-            return key
-        serial = entry.get("serial")
-        if isinstance(serial, int):
-            return f"serial::{serial}"
-        serialized = json.dumps(entry, ensure_ascii=False, sort_keys=True)
-        return safe_filename(serialized)
-
-    def _next_serial(self) -> int:
-        highest = 0
-        for candidate in self.entries.values():
-            if not isinstance(candidate, dict):
-                continue
-            value = candidate.get("serial")
-            if isinstance(value, int) and value > highest:
-                highest = value
-        return highest + 1
-
-    def ensure_entry(self, entry: Dict[str, object]) -> str:
-        entry_id: Optional[str] = None
-        documents = entry.get("documents")
-        if isinstance(documents, list):
-            for document in documents:
-                if not isinstance(document, dict):
-                    continue
-                url_value = document.get("url")
-                if not isinstance(url_value, str) or not url_value:
-                    continue
-                file_record = self.files.get(url_value)
-                if isinstance(file_record, dict):
-                    existing_id = file_record.get("entry_id")
-                    if isinstance(existing_id, str) and existing_id in self.entries:
-                        entry_id = existing_id
-                        break
-                for existing_id, existing_entry in self.entries.items():
-                    documents_list = existing_entry.get("documents", [])
-                    if not isinstance(documents_list, list):
-                        continue
-                    for existing_doc in documents_list:
-                        if (
-                            isinstance(existing_doc, dict)
-                            and existing_doc.get("url") == url_value
-                        ):
-                            entry_id = existing_id
-                            break
-                    if entry_id is not None:
-                        break
-                if entry_id is not None:
-                    break
-        if entry_id is None:
-            entry_id = self._entry_id(entry)
-        existing = self.entries.get(entry_id)
-        serial = entry.get("serial")
-        title = entry.get("title")
-        remark = entry.get("remark")
-
-        def serial_in_use(value: int, exclude: Optional[Dict[str, object]] = None) -> bool:
-            for candidate in self.entries.values():
-                if not isinstance(candidate, dict):
-                    continue
-                if exclude is not None and candidate is exclude:
-                    continue
-                if candidate.get("serial") == value:
-                    return True
-            return False
-
-        if isinstance(existing, dict):
-            if isinstance(title, str):
-                existing["title"] = title
-            if isinstance(remark, str):
-                existing["remark"] = remark
-            if isinstance(serial, int):
-                current_serial = existing.get("serial")
-                if not isinstance(current_serial, int):
-                    candidate = serial if serial > 0 else None
-                    if isinstance(candidate, int) and serial_in_use(candidate, exclude=existing):
-                        candidate = None
-                    if not isinstance(candidate, int):
-                        candidate = self._next_serial()
-                    existing["serial"] = candidate
-            return entry_id
-
-        assigned_serial: Optional[int] = None
-        if isinstance(serial, int) and serial > 0 and not serial_in_use(serial):
-            assigned_serial = serial
-        if not isinstance(assigned_serial, int):
-            assigned_serial = self._next_serial()
-
-        self.entries[entry_id] = {
-            "serial": assigned_serial,
-            "title": title if isinstance(title, str) else "",
-            "remark": remark if isinstance(remark, str) else "",
-            "documents": [],
-        }
-        return entry_id
-
-    def merge_documents(self, entry_id: str, documents: Sequence[Dict[str, object]]) -> None:
-        entry = self.entries.setdefault(entry_id, {"documents": []})
-        existing_docs: Dict[str, Dict[str, object]] = {}
-        for item in entry.get("documents", []):
-            if isinstance(item, dict):
-                url_value = item.get("url")
-                if isinstance(url_value, str):
-                    existing_docs[url_value] = item
-        for document in documents:
-            if not isinstance(document, dict):
-                continue
-            url_value = document.get("url")
-            if not isinstance(url_value, str) or not url_value:
-                continue
-            doc_type = document.get("type")
-            if not isinstance(doc_type, str) or not doc_type:
-                doc_type = classify_document_type(url_value)
-            title = document.get("title")
-            if not isinstance(title, str):
-                title = ""
-            file_record = self.files.get(url_value)
-            downloaded_flag = bool(document.get("downloaded"))
-            if file_record and file_record.get("downloaded"):
-                downloaded_flag = True
-            local_path = document.get("local_path")
-            if not isinstance(local_path, str):
-                if file_record:
-                    stored_path = file_record.get("local_path")
-                    if isinstance(stored_path, str):
-                        local_path = stored_path
-                else:
-                    local_path = None
-            existing_doc = existing_docs.get(url_value)
-            if existing_doc:
-                existing_doc["type"] = doc_type
-                if title:
-                    existing_doc["title"] = title
-                if downloaded_flag:
-                    existing_doc["downloaded"] = True
-                if local_path:
-                    existing_doc["local_path"] = local_path
-            else:
-                new_doc: Dict[str, object] = {
-                    "url": url_value,
-                    "type": doc_type,
-                    "title": title,
-                }
-                if downloaded_flag:
-                    new_doc["downloaded"] = True
-                if local_path:
-                    new_doc["local_path"] = local_path
-                entry.setdefault("documents", []).append(new_doc)
-                existing_docs[url_value] = new_doc
-            if file_record:
-                if title:
-                    file_record["title"] = title
-                file_record["type"] = doc_type
-                if downloaded_flag:
-                    file_record["downloaded"] = True
-                if local_path:
-                    file_record["local_path"] = local_path
-                file_record["entry_id"] = entry_id
-            elif downloaded_flag:
-                file_entry: Dict[str, object] = {
-                    "entry_id": entry_id,
-                    "title": title,
-                    "type": doc_type,
-                    "downloaded": True,
-                }
-                if local_path:
-                    file_entry["local_path"] = local_path
-                self.files[url_value] = file_entry
-
-    def is_downloaded(self, url_value: str) -> bool:
-        record = self.files.get(url_value)
-        if not record:
-            return False
-        return bool(record.get("downloaded"))
-
-    def mark_downloaded(
-        self,
-        entry_id: str,
-        url_value: str,
-        title: str,
-        doc_type: str,
-        local_path: Optional[str],
-    ) -> None:
-        file_entry = self.files.setdefault(url_value, {})
-        file_entry["entry_id"] = entry_id
-        file_entry["title"] = title
-        file_entry["type"] = doc_type
-        file_entry["downloaded"] = True
-        if local_path:
-            file_entry["local_path"] = local_path
-        entry = self.entries.get(entry_id)
-        if not entry:
-            return
-        for document in entry.get("documents", []):
-            if not isinstance(document, dict):
-                continue
-            if document.get("url") == url_value:
-                document["type"] = doc_type
-                if title:
-                    document["title"] = title
-                document["downloaded"] = True
-                if local_path:
-                    document["local_path"] = local_path
-                break
-        else:
-            new_doc: Dict[str, object] = {
-                "url": url_value,
-                "type": doc_type,
-                "title": title,
-                "downloaded": True,
-            }
-            if local_path:
-                new_doc["local_path"] = local_path
-            entry.setdefault("documents", []).append(new_doc)
-
-    def clear_downloaded(self, url_value: str) -> None:
-        file_record = self.files.get(url_value)
-        if file_record:
-            file_record["downloaded"] = False
-            file_record.pop("local_path", None)
-        for entry in self.entries.values():
-            documents = entry.get("documents", [])
-            if not isinstance(documents, list):
-                continue
-            for document in documents:
-                if not isinstance(document, dict):
-                    continue
-                if document.get("url") == url_value:
-                    document.pop("local_path", None)
-                    if "downloaded" in document:
-                        document.pop("downloaded", None)
-
-    def update_document_title(self, url_value: str, title: str) -> None:
-        if not title:
-            return
-        file_record = self.files.get(url_value)
-        if file_record:
-            file_record["title"] = title
-        for entry in self.entries.values():
-            for document in entry.get("documents", []):
-                if isinstance(document, dict) and document.get("url") == url_value:
-                    document["title"] = title
-
-    def to_jsonable(self) -> Dict[str, object]:
-        entries_list: List[Dict[str, object]] = []
-        for entry in self.entries.values():
-            documents: List[Dict[str, object]] = []
-            for document in entry.get("documents", []):
-                if not isinstance(document, dict):
-                    continue
-                doc_output: Dict[str, object] = {
-                    "type": document.get("type"),
-                    "url": document.get("url"),
-                    "title": document.get("title", ""),
-                }
-                if document.get("downloaded"):
-                    doc_output["downloaded"] = True
-                local_path = document.get("local_path")
-                if isinstance(local_path, str) and local_path:
-                    doc_output["local_path"] = local_path
-                documents.append(doc_output)
-            entry_output: Dict[str, object] = {
-                "serial": entry.get("serial"),
-                "title": entry.get("title", ""),
-                "remark": entry.get("remark", ""),
-                "documents": documents,
-            }
-            entries_list.append(entry_output)
-        entries_list.sort(
-            key=lambda item: (
-                item.get("serial") is None,
-                item.get("serial") if isinstance(item.get("serial"), int) else 0,
-                item.get("title", ""),
-            )
-        )
-        return {"entries": entries_list}
-
-    @classmethod
-    def from_jsonable(cls, data: object) -> "PBCState":
-        state = cls()
-        if isinstance(data, dict) and "entries" in data:
-            entries = data.get("entries")
-            if isinstance(entries, list):
-                for entry in entries:
-                    if not isinstance(entry, dict):
-                        continue
-                    normalized = {
-                        "serial": entry.get("serial")
-                        if isinstance(entry.get("serial"), int)
-                        else None,
-                        "title": entry.get("title", ""),
-                        "remark": entry.get("remark", ""),
-                    }
-                    entry_id = state.ensure_entry(normalized)
-                    documents: List[Dict[str, object]] = []
-                    for document in entry.get("documents", []):
-                        if not isinstance(document, dict):
-                            continue
-                        documents.append(
-                            {
-                                "url": document.get("url"),
-                                "type": document.get("type"),
-                                "title": document.get("title", ""),
-                                "downloaded": bool(document.get("downloaded")),
-                                "local_path": document.get("local_path"),
-                            }
-                        )
-                    state.merge_documents(entry_id, documents)
-            return state
-        if isinstance(data, dict):
-            converted_items = [
-                {"url": url, "name": name}
-                for url, name in data.items()
-                if isinstance(url, str)
-            ]
-        elif isinstance(data, list):
-            converted_items = []
-            for item in data:
-                if isinstance(item, str):
-                    converted_items.append({"url": item, "name": ""})
-                elif isinstance(item, dict):
-                    converted_items.append(
-                        {"url": item.get("url"), "name": item.get("name", "")}
-                    )
-        else:
-            converted_items = []
-        for converted in converted_items:
-            url_value = converted.get("url")
-            if not isinstance(url_value, str):
-                continue
-            name = converted.get("name")
-            title = str(name) if name is not None else ""
-            entry_id = state.ensure_entry({"title": title, "remark": ""})
-            document = {
-                "url": url_value,
-                "type": classify_document_type(url_value),
-                "title": title or url_value,
-                "downloaded": True,
-            }
-            state.merge_documents(entry_id, [document])
-        return state
-
-
-def load_state(state_file: Optional[str]) -> PBCState:
-    if not state_file or not os.path.exists(state_file):
-        return PBCState()
-    with open(state_file, "r", encoding="utf-8") as fh:
-        data = json.load(fh)
-    return PBCState.from_jsonable(data)
-
-
-def save_state(state_file: Optional[str], state: PBCState) -> None:
-    if not state_file:
-        return
-    os.makedirs(os.path.dirname(state_file), exist_ok=True)
-    with open(state_file, "w", encoding="utf-8") as fh:
-        json.dump(state.to_jsonable(), fh, ensure_ascii=False, indent=2)
-
 
 def _local_file_exists(path: Optional[str]) -> bool:
     if not path or not isinstance(path, str):
@@ -1384,6 +298,29 @@ def _ensure_canonical_local_path(
     if isinstance(doc_record, dict):
         doc_record["local_path"] = str(expected_path)
     return True
+
+
+def _resolve_artifact_path(
+    value: Optional[str],
+    artifact_dir: str,
+    subdir: str,
+    *,
+    task_name: Optional[str] = None,
+    default_basename: Optional[str] = None,
+) -> Optional[str]:
+    """Normalize CLI/config paths with shared rules."""
+
+    selected: Optional[str]
+    if isinstance(value, str):
+        stripped = value.strip()
+        selected = stripped or None
+    else:
+        selected = value
+    if selected is not None:
+        return _normalize_output_path(selected, artifact_dir, subdir, task_name)
+    if default_basename is not None:
+        return _normalize_output_path(default_basename, artifact_dir, subdir, task_name)
+    return None
 
 
 def _normalize_output_path(
@@ -1437,24 +374,6 @@ def _ensure_unique_path(output_dir: str, filename: str, overwrite: bool = False)
     return candidate
 
 
-def _cache_path_for_url(page_cache_dir: str, url: str) -> str:
-    parsed = urlparse(url)
-    components = [
-        part
-        for part in (
-            parsed.netloc,
-            parsed.path.strip("/") if parsed.path else "",
-            parsed.query,
-        )
-        if part
-    ]
-    if not components:
-        components = [url]
-    filename_base = safe_filename("_".join(components))
-    if not filename_base:
-        filename_base = "page"
-    filename = f"{filename_base}.html"
-    return os.path.join(page_cache_dir, filename)
 
 
 def _listing_cache_is_fresh(
@@ -1463,7 +382,7 @@ def _listing_cache_is_fresh(
 ) -> bool:
     if not page_cache_dir or not start_url:
         return False
-    cache_path = _cache_path_for_url(page_cache_dir, start_url)
+    cache_path = build_cache_path_for_url(page_cache_dir, start_url)
     if not os.path.exists(cache_path):
         return False
     mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
@@ -1956,8 +875,8 @@ def download_from_structure(
     entries = data.get("entries")
     if not isinstance(entries, list):
         return []
-    session = _create_session()
-    state = load_state(state_file)
+    session = create_session()
+    state = load_state(state_file, classify_document_type)
     downloaded: List[str] = []
     stats = TaskStats()
     for entry in entries:
@@ -1985,8 +904,8 @@ def download_from_structure(
         if state_dirty and state_file:
             save_state(state_file, state)
     save_state(state_file, state)
-    summary_state = load_state(state_file)
-    _log_task_summary(
+    summary_state = load_state(state_file, classify_document_type)
+    log_task_summary(
         task_name or structure_path,
         stats,
         downloaded,
@@ -2013,7 +932,7 @@ def cache_listing_pages(
         "yes" if refresh_cache else "no",
     )
     os.makedirs(page_cache_dir, exist_ok=True)
-    session = _create_session()
+    session = create_session()
     page_count = 0
     for page_url, _, html_path in iterate_listing_pages(
         session,
@@ -2051,7 +970,7 @@ def snapshot_listing(
     refresh_cache: bool = False,
 ) -> Dict[str, object]:
     logger.info("Starting listing snapshot for %s", start_url)
-    session = _create_session()
+    session = create_session()
     state = PBCState()
     pages: List[Dict[str, object]] = []
     if page_cache_dir:
@@ -2133,7 +1052,7 @@ def fetch_listing_html(
     jitter: float,
     timeout: float,
 ) -> str:
-    session = _create_session()
+    session = create_session()
     return _fetch(session, start_url, delay, jitter, timeout)
 
 
@@ -2172,8 +1091,8 @@ def monitor_once(
     use_cache: bool = False,
     refresh_cache: bool = False,
 ) -> List[str]:
-    session = _create_session()
-    state = load_state(state_file)
+    session = create_session()
+    state = load_state(state_file, classify_document_type)
     if page_cache_dir:
         os.makedirs(page_cache_dir, exist_ok=True)
     new_files = collect_new_files(
@@ -2260,8 +1179,8 @@ def monitor_loop(
             use_cache=use_cache_flag,
             refresh_cache=refresh_cache_flag,
         )
-        summary_state = load_state(state_file)
-        _log_task_summary(
+        summary_state = load_state(state_file, classify_document_type)
+        log_task_summary(
             task_name or start_url,
             iteration_stats,
             new_files,
@@ -2277,181 +1196,12 @@ def monitor_loop(
         time.sleep(sleep_seconds)
 
 
-def _resolve_setting(
-    cli_value: Optional[Any],
-    config: Dict[str, Any],
-    key: str,
-    fallback: Optional[Any] = None,
-) -> Optional[Any]:
-    if cli_value is not None:
-        return cli_value
-    if config and key in config:
-        return config[key]
-    return fallback
-
-
 def main(argv: Optional[Sequence[str]] = None) -> None:
-    parser = argparse.ArgumentParser(description="Monitor PBC attachment updates")
-    parser.add_argument("output_dir", nargs="?", help="directory for downloaded files")
-    parser.add_argument("start_url", nargs="?", help="listing URL to monitor")
-    parser.add_argument(
-        "--config",
-        default="pbc_config.json",
-        help="path to JSON config with default settings",
-    )
-    parser.add_argument(
-        "--artifact-dir",
-        default=None,
-        help="base directory for cached pages, snapshots, and state",
-    )
-    parser.add_argument(
-        "--state-file",
-        default=None,
-        help="path to JSON file tracking downloaded attachment URLs",
-    )
-    parser.add_argument(
-        "--delay",
-        type=float,
-        default=None,
-        help="base delay in seconds before each request",
-    )
-    parser.add_argument(
-        "--jitter",
-        type=float,
-        default=None,
-        help="additional random delay in seconds",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=None,
-        help="HTTP timeout in seconds",
-    )
-    parser.add_argument(
-        "--min-hours",
-        type=float,
-        default=None,
-        help="minimum hours between checks when running continuously",
-    )
-    parser.add_argument(
-        "--max-hours",
-        type=float,
-        default=None,
-        help="maximum hours between checks when running continuously",
-    )
-    parser.add_argument(
-        "--build-page-structure",
-        nargs="?",
-        const="structure.json",
-        dest="build_structure",
-        help="build full listing structure to stdout or given file",
-    )
-    parser.add_argument(
-        "--dump-structure",
-        nargs="?",
-        const="structure.json",
-        dest="build_structure",
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--download-from-structure",
-        nargs="?",
-        const="structure.json",
-        help="download attachments defined in a structure snapshot",
-    )
-    parser.add_argument(
-        "--preview-page-structure",
-        metavar="HTML",
-        nargs="?",
-        const="page.html",
-        dest="preview_page",
-        help="parse a cached HTML page and preview its structure",
-    )
-    parser.add_argument(
-        "--dump-from-file",
-        metavar="HTML",
-        nargs="?",
-        const="page.html",
-        dest="preview_page",
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--cache-start-page",
-        nargs="?",
-        const="page.html",
-        dest="cache_start_page",
-        help="cache the start page HTML to stdout or a file",
-    )
-    parser.add_argument(
-        "--fetch-page",
-        nargs="?",
-        const="page.html",
-        dest="cache_start_page",
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--cache-listing",
-        action="store_true",
-        dest="cache_listing",
-        help="cache all listing pages before parsing or downloading",
-    )
-    parser.add_argument(
-        "--prefetch-pages",
-        action="store_true",
-        dest="cache_listing",
-        help=argparse.SUPPRESS,
-    )
-    parser.add_argument(
-        "--refresh-pages",
-        action="store_true",
-        help="force re-downloading listing pages even if cached",
-    )
-    parser.add_argument(
-        "--use-cached-pages",
-        action="store_true",
-        help="reuse cached listing pages when available instead of fetching",
-    )
-    parser.add_argument(
-        "--no-use-cached-pages",
-        action="store_true",
-        help="ignore cached listing pages and always fetch fresh copies",
-    )
-    parser.add_argument(
-        "--task",
-        default=None,
-        help="name of task to run when multiple are configured",
-    )
-    parser.add_argument(
-        "--run-once",
-        action="store_true",
-        help="perform a single check instead of looping",
-    )
-    parser.add_argument(
-        "--verify-local",
-        action="store_true",
-        help="re-download attachments if recorded local files are missing",
-    )
-    args = parser.parse_args(argv)
+    from .runner import main as runner_main
 
-    if not logging.getLogger().handlers:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(message)s",
-        )
+    runner_main(argv)
 
-    config = load_config(args.config)
-    artifact_dir_value = _resolve_setting(args.artifact_dir, config, "artifact_dir", "artifacts")
-    artifact_dir = os.path.abspath(str(artifact_dir_value))
-    logger.info("Using artifact directory: %s", artifact_dir)
 
-    tasks = _build_tasks(args, config, artifact_dir)
-    if not tasks:
-        raise SystemExit("No tasks configured")
-
-    logger.info("Executing %d task(s)", len(tasks))
-
-    for task in tasks:
-        _run_task(task, args, config, artifact_dir)
 
 
 if __name__ == "__main__":
