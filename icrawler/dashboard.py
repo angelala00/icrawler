@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Dict, Iterable, List, Optional
+from urllib.parse import urlsplit
 
 from . import pbc_monitor as core
 from .fetching import build_cache_path_for_url
@@ -313,12 +314,23 @@ def render_dashboard_html(
             "stale": "status-stale",
         }.get(task.status, "status-waiting")
 
+        url_html = "—"
+        if task.start_url:
+            display_url, full_url = _summarize_url(task.start_url)
+            url_html = (
+                f"<a href=\"{_escape(task.start_url)}\" target=\"_blank\" rel=\"noopener\" "
+                f"title=\"{_escape(full_url)}\">"
+                f"<span class=\"url-text\">{_escape(display_url)}</span>"
+                "<span class=\"external-icon\" aria-hidden=\"true\">↗</span>"
+                "</a>"
+            )
+
         rows.append(
             """
             <tr>
               <td class="task-name">
                 <div class="name">{name}</div>
-                <div class="url"><a href="{url}" target="_blank" rel="noopener">{url}</a></div>
+                <div class="url">{url}</div>
               </td>
               <td class="metric">{entries}</td>
               <td class="metric">{documents}</td>
@@ -334,7 +346,7 @@ def render_dashboard_html(
             </tr>
             """.format(
                 name=_escape(task.name),
-                url=_escape(task.start_url or ""),
+                url=url_html,
                 entries=task.entries_total,
                 documents=task.documents_total,
                 downloaded=task.downloaded_total,
@@ -390,10 +402,12 @@ def render_dashboard_html(
         th {{ padding: 0.75rem 1rem; text-align: left; white-space: nowrap; }}
         td {{ padding: 0.75rem 1rem; border-top: 1px solid #e3e8f2; vertical-align: top; word-break: break-word; overflow-wrap: anywhere; }}
         tr:hover {{ background: #f8faff; }}
-        .task-name {{ max-width: 18rem; }}
-        .task-name .name {{ font-weight: 600; margin-bottom: 0.3rem; }}
-        .task-name .url {{ font-size: 0.85rem; color: #2563eb; }}
-        .task-name .url a {{ color: inherit; text-decoration: none; word-break: break-all; display: inline-block; }}
+        .task-name {{ max-width: 18rem; display: flex; flex-direction: column; gap: 0.2rem; }}
+        .task-name .name {{ font-weight: 600; line-height: 1.3; }}
+        .task-name .url {{ font-size: 0.85rem; color: #2563eb; overflow: hidden; word-break: normal; overflow-wrap: normal; }}
+        .task-name .url a {{ color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem; max-width: 100%; }}
+        .task-name .url a .url-text {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+        .task-name .url .external-icon {{ font-size: 0.8rem; color: #94a3b8; flex-shrink: 0; }}
         .task-name .url a:hover {{ text-decoration: underline; }}
         td.metric {{ white-space: nowrap; font-variant-numeric: tabular-nums; }}
         td.status-cell {{ min-width: 9rem; }}
@@ -450,6 +464,30 @@ def _escape(value: str) -> str:
     import html
 
     return html.escape(value, quote=True)
+
+
+def _summarize_url(url: str) -> tuple[str, str]:
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return url, url
+
+    host = parsed.netloc
+    path = parsed.path or ""
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    if parsed.fragment:
+        path = f"{path}#{parsed.fragment}"
+
+    display = (host + path) if host or path else url
+    if not display:
+        display = url
+
+    max_length = 60
+    if len(display) > max_length:
+        display = display[: max_length - 1] + "…"
+
+    return display, url
 
 
 def _serve_dashboard(
