@@ -124,3 +124,36 @@ All generated files live under `artifact_dir` (default `./artifacts`):
 
 Relative filenames supplied on the CLI are resolved inside these folders; use an
 absolute path to opt out. Adjust the root via `--artifact-dir` or the config.
+
+## Policy Finder API
+
+The fuzzy policy search helper located in `searcher/policy_finder.py` can be
+exposed over HTTP for integration with other services. Start the API server
+with:
+
+```
+python -m searcher.api_server --host 0.0.0.0 --port 8001
+```
+
+By default the server automatically locates `policy_updates` and
+`regulator_notice` state files using the same rules as the CLI utility. Pass
+`--policy-updates` / `--regulator-notice` to override the discovery.
+
+Send either a GET or POST request to `/search` to run a query. Example GET
+request:
+
+```
+curl "http://localhost:8001/search?query=中国人民银行公告"
+```
+
+POST requests accept JSON and support additional parameters:
+
+```
+curl -X POST \
+     -H "Content-Type: application/json" \
+     -d '{"query": "金融稳定", "topk": 3, "include_documents": false}' \
+     http://localhost:8001/search
+```
+
+Responses contain the matched entries sorted by score along with metadata such
+as document number, year and resolved file path.
