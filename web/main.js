@@ -23,8 +23,18 @@
   const searchSubmitButton = document.getElementById("search-submit");
   const searchResultsList = document.getElementById("search-results");
   const searchStatusEl = document.getElementById("search-status");
+  const entriesModal = document.getElementById("entries-modal");
+  const entriesModalTitle = document.getElementById("entries-modal-title");
+  const entriesModalMeta = document.getElementById("entries-modal-meta");
+  const entriesModalBody = document.getElementById("entries-modal-body");
+  const entriesModalClose = document.getElementById("entries-modal-close");
+  const entriesModalBackdrop = entriesModal
+    ? entriesModal.querySelector("[data-close-modal]")
+    : null;
 
   let currentData = null;
+  const taskEntriesCache = new Map();
+  let lastFocusedElement = null;
 
   function buildUrl(base, path) {
     if (!base) {
@@ -385,6 +395,375 @@
     }
   }
 
+  function findTaskBySlug(slug) {
+    if (!slug || !Array.isArray(currentData)) {
+      return null;
+    }
+    for (let index = 0; index < currentData.length; index += 1) {
+      const task = currentData[index];
+      if (task && typeof task === "object" && task.slug === slug) {
+        return task;
+      }
+    }
+    return null;
+  }
+
+  function updateEntriesCacheFromTasks(tasks) {
+    if (!Array.isArray(tasks)) {
+      taskEntriesCache.clear();
+      return;
+    }
+    const seen = new Set();
+    for (let index = 0; index < tasks.length; index += 1) {
+      const task = tasks[index];
+      if (!task || typeof task !== "object" || !task.slug) {
+        continue;
+      }
+      seen.add(task.slug);
+      const entriesData = Array.isArray(task.entries) ? task.entries : null;
+      const existing = taskEntriesCache.get(task.slug);
+      if (existing) {
+        const updated = {
+          entries: existing.entries,
+          task,
+        };
+        if (entriesData !== null) {
+          updated.entries = entriesData;
+        }
+        taskEntriesCache.set(task.slug, updated);
+      } else {
+        taskEntriesCache.set(task.slug, {
+          entries: entriesData,
+          task,
+        });
+      }
+    }
+    taskEntriesCache.forEach(function (_value, key) {
+      if (!seen.has(key)) {
+        taskEntriesCache.delete(key);
+      }
+    });
+  }
+
+  function cacheTaskEntries(slug, entries, taskInfo) {
+    if (!slug) {
+      return;
+    }
+    const normalizedEntries = Array.isArray(entries) ? entries : null;
+    const info =
+      taskInfo && typeof taskInfo === "object"
+        ? taskInfo
+        : findTaskBySlug(slug);
+    taskEntriesCache.set(slug, {
+      entries: normalizedEntries,
+      task: info || null,
+    });
+  }
+
+  function updateEntriesModalMeta(taskInfo, entries) {
+    if (!entriesModalMeta) {
+      return;
+    }
+    const parts = [];
+    let count = null;
+    if (Array.isArray(entries)) {
+      count = entries.length;
+    } else if (taskInfo && typeof taskInfo.entries_total === "number") {
+      count = taskInfo.entries_total;
+    }
+    if (count !== null) {
+      parts.push(`条目 ${count}`);
+    }
+    if (taskInfo && typeof taskInfo.documents_total === "number") {
+      parts.push(`文档 ${taskInfo.documents_total}`);
+    }
+    if (taskInfo && typeof taskInfo.downloaded_total === "number") {
+      parts.push(`已下载 ${taskInfo.downloaded_total}`);
+    }
+    if (taskInfo && typeof taskInfo.pending_total === "number") {
+      parts.push(`待下载 ${taskInfo.pending_total}`);
+    }
+    if (taskInfo && taskInfo.state_last_updated) {
+      parts.push(`更新 ${formatDate(taskInfo.state_last_updated)}`);
+    }
+    entriesModalMeta.textContent = parts.join(" · ");
+  }
+
+  function handleEntriesKeydown(event) {
+    if (event.key === "Escape" || event.key === "Esc") {
+      event.preventDefault();
+      closeEntriesModal();
+    }
+  }
+
+  function openEntriesModal(taskInfo) {
+    if (!entriesModal) {
+      return;
+    }
+    if (entriesModalTitle) {
+      const name = taskInfo && taskInfo.name ? String(taskInfo.name) : "";
+      entriesModalTitle.textContent = name
+        ? `${name} · 条目列表`
+        : "条目列表";
+    }
+    const initialEntries =
+      taskInfo && Array.isArray(taskInfo.entries) ? taskInfo.entries : null;
+    updateEntriesModalMeta(taskInfo, initialEntries);
+    if (entriesModalBody) {
+      entriesModalBody.innerHTML =
+        '<p class="modal__empty">正在加载条目…</p>';
+      entriesModalBody.scrollTop = 0;
+    }
+    entriesModal.classList.remove("hidden");
+    if (document.body) {
+      document.body.classList.add("modal-open");
+    }
+    const activeElement = document.activeElement;
+    if (activeElement && typeof activeElement.focus === "function") {
+      lastFocusedElement = activeElement;
+    } else {
+      lastFocusedElement = null;
+    }
+    if (entriesModalClose) {
+      entriesModalClose.focus();
+    }
+    document.addEventListener("keydown", handleEntriesKeydown);
+  }
+
+  function closeEntriesModal() {
+    if (!entriesModal) {
+      return;
+    }
+    entriesModal.classList.add("hidden");
+    if (document.body) {
+      document.body.classList.remove("modal-open");
+    }
+    document.removeEventListener("keydown", handleEntriesKeydown);
+    if (entriesModalBody) {
+      entriesModalBody.scrollTop = 0;
+    }
+    const target = lastFocusedElement;
+    lastFocusedElement = null;
+    if (target && typeof target.focus === "function") {
+      target.focus();
+    }
+  }
+
+  function setEntriesModalLoading(taskInfo) {
+    if (entriesModalBody) {
+      entriesModalBody.innerHTML =
+        '<p class="modal__empty">正在加载条目…</p>';
+      entriesModalBody.scrollTop = 0;
+    }
+    updateEntriesModalMeta(taskInfo, null);
+  }
+
+  function renderEntriesList(entries) {
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return '<p class="modal__empty">暂无条目。</p>';
+    }
+    const items = entries
+      .map((entry, index) => {
+        const serialValue =
+          entry && typeof entry.serial === "number" && Number.isFinite(entry.serial)
+            ? entry.serial
+            : index + 1;
+        const serialHtml =
+          '<span class="entries-list__serial">#' +
+          escapeHtml(serialValue) +
+          "</span>";
+        const titleText = entry && entry.title ? entry.title : "未命名条目";
+        const titleHtml =
+          '<span class="entries-list__title">' +
+          escapeHtml(titleText) +
+          "</span>";
+        const header =
+          '<div class="entries-list__header">' +
+          serialHtml +
+          titleHtml +
+          "</div>";
+        const remarkHtml =
+          entry && entry.remark
+            ? '<div class="entries-list__remark">' +
+              escapeHtml(entry.remark) +
+              "</div>"
+            : "";
+        const documents = Array.isArray(entry && entry.documents)
+          ? entry.documents
+          : [];
+        let documentsHtml;
+        if (documents.length) {
+          const docItems = documents
+            .map((doc) => {
+              const titleValue =
+                doc && doc.title
+                  ? doc.title
+                  : doc && doc.url
+                  ? doc.url
+                  : "未命名文档";
+              const link =
+                doc && doc.url
+                  ? '<a href="' +
+                    escapeHtml(doc.url) +
+                    '" target="_blank" rel="noopener">' +
+                    escapeHtml(titleValue) +
+                    "</a>"
+                  : '<span>' + escapeHtml(titleValue) + "</span>";
+              const metaPieces = [];
+              if (doc && doc.type) {
+                metaPieces.push(
+                  '<span class="entries-documents__meta">' +
+                    escapeHtml(doc.type) +
+                    "</span>"
+                );
+              }
+              if (doc && doc.local_path) {
+                metaPieces.push(
+                  '<span class="entries-documents__meta"><code>' +
+                    escapeHtml(doc.local_path) +
+                    "</code></span>"
+                );
+              }
+              if (doc && doc.downloaded) {
+                metaPieces.push(
+                  '<span class="entries-documents__badge">已下载</span>'
+                );
+              }
+              const metaHtml = metaPieces.length ? " " + metaPieces.join(" ") : "";
+              return `<li>${link}${metaHtml}</li>`;
+            })
+            .join("");
+          documentsHtml = `<ul class="entries-documents">${docItems}</ul>`;
+        } else {
+          documentsHtml =
+            '<div class="entries-documents entries-documents--empty">暂无关联文档</div>';
+        }
+        return `<li class="entries-list__item">${header}${remarkHtml}${documentsHtml}</li>`;
+      })
+      .join("");
+    return `<ol class="entries-list">${items}</ol>`;
+  }
+
+  function setEntriesModalEntries(taskInfo, entries) {
+    if (entriesModalBody) {
+      entriesModalBody.innerHTML = renderEntriesList(entries);
+      entriesModalBody.scrollTop = 0;
+    }
+    updateEntriesModalMeta(taskInfo, entries);
+  }
+
+  function setEntriesModalError(taskInfo, message) {
+    if (entriesModalBody) {
+      const text = message || "无法加载条目。";
+      entriesModalBody.innerHTML =
+        '<p class="modal__error">' + escapeHtml(text) + "</p>";
+      entriesModalBody.scrollTop = 0;
+    }
+    updateEntriesModalMeta(taskInfo, null);
+  }
+
+  async function fetchTaskEntries(slug) {
+    if (!slug) {
+      throw new Error("无效的任务标识");
+    }
+    const response = await fetch(
+      buildUrl(apiBase, `/api/tasks/${encodeURIComponent(slug)}/entries`),
+      {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      },
+    );
+    if (!response.ok) {
+      let errorDetail = `${response.status} ${response.statusText}`;
+      try {
+        const errorPayload = await response.json();
+        if (errorPayload && typeof errorPayload.error === "string") {
+          errorDetail = errorPayload.error;
+        }
+      } catch (error) {
+        // ignore JSON parse issues
+      }
+      throw new Error(errorDetail);
+    }
+    const payload = await response.json();
+    const entries = Array.isArray(payload.entries) ? payload.entries : [];
+    const taskInfo =
+      payload && typeof payload.task === "object" ? payload.task : null;
+    return { entries, task: taskInfo };
+  }
+
+  function handleEntriesTriggerClick(event) {
+    const trigger = event.target.closest(".entries-link");
+    if (!trigger) {
+      return;
+    }
+    event.preventDefault();
+    const slug = trigger.getAttribute("data-task-slug");
+    if (!slug) {
+      return;
+    }
+    const nameAttr = trigger.getAttribute("data-task-name") || "";
+    const countAttr = trigger.getAttribute("data-task-count") || "";
+    let taskInfo = findTaskBySlug(slug);
+    if (!taskInfo) {
+      const parsedCount = Number(countAttr);
+      taskInfo = {
+        name: nameAttr,
+        entries_total: Number.isFinite(parsedCount) ? parsedCount : 0,
+      };
+    }
+    const cached = taskEntriesCache.get(slug);
+    let initialEntries = null;
+    if (cached && Array.isArray(cached.entries)) {
+      initialEntries = cached.entries;
+    } else if (taskInfo && Array.isArray(taskInfo.entries)) {
+      initialEntries = taskInfo.entries;
+    }
+    openEntriesModal(taskInfo);
+    if (Array.isArray(initialEntries)) {
+      cacheTaskEntries(slug, initialEntries, taskInfo);
+      setEntriesModalEntries(taskInfo, initialEntries);
+      return;
+    }
+    if (staticSnapshot) {
+      setEntriesModalError(
+        taskInfo,
+        "静态快照不包含条目明细，请在服务模式下查看。",
+      );
+      return;
+    }
+    setEntriesModalLoading(taskInfo);
+    fetchTaskEntries(slug)
+      .then(({ entries, task }) => {
+        const info = task && typeof task === "object" ? task : taskInfo;
+        cacheTaskEntries(slug, entries, info);
+        setEntriesModalEntries(info, entries);
+      })
+      .catch((error) => {
+        const message =
+          error && error.message ? error.message : "无法加载条目。";
+        setEntriesModalError(taskInfo, message);
+      });
+  }
+
+  function initEntriesModal() {
+    if (!entriesModal) {
+      return;
+    }
+    if (entriesModalClose) {
+      entriesModalClose.addEventListener("click", (event) => {
+        event.preventDefault();
+        closeEntriesModal();
+      });
+    }
+    if (entriesModalBackdrop) {
+      entriesModalBackdrop.addEventListener("click", (event) => {
+        event.preventDefault();
+        closeEntriesModal();
+      });
+    }
+  }
+
   function renderSummary(tasks) {
     if (!summaryEl) {
       return;
@@ -468,10 +847,32 @@
             "</a>";
         }
 
-        const cacheInfo = `${task.pages_cached || 0} pages${task.page_cache_fresh ? " (fresh today)" : ""}`;
+        const cacheInfo = `${
+          task.pages_cached || 0
+        } pages${task.page_cache_fresh ? " (fresh today)" : ""}`;
         const outputInfo = `${task.output_files || 0} files / ${
           task.output_size_bytes || 0
         } bytes`;
+        const entriesValueRaw = task.entries_total;
+        let entriesCount = 0;
+        if (typeof entriesValueRaw === "number" && Number.isFinite(entriesValueRaw)) {
+          entriesCount = entriesValueRaw;
+        } else if (typeof entriesValueRaw === "string") {
+          const parsed = Number.parseInt(entriesValueRaw, 10);
+          if (Number.isFinite(parsed)) {
+            entriesCount = parsed;
+          }
+        }
+        const entriesString = String(entriesCount);
+        const entriesLabel = escapeHtml(entriesString);
+        let entriesCellHtml = entriesLabel;
+        if (task.slug) {
+          entriesCellHtml =
+            `<button type="button" class="entries-link" data-task-slug="${escapeHtml(
+              task.slug,
+            )}" data-task-name="${escapeHtml(task.name || "")}" data-task-count="${entriesLabel}">` +
+            `${entriesLabel}</button>`;
+        }
 
         return `
           <tr>
@@ -479,7 +880,7 @@
               <div class="name">${escapeHtml(task.name || "—")}</div>
               <div class="url">${urlHtml}</div>
             </td>
-            <td class="metric">${escapeHtml(task.entries_total || 0)}</td>
+            <td class="metric">${entriesCellHtml}</td>
             <td class="metric">${escapeHtml(task.documents_total || 0)}</td>
             <td class="metric">${escapeHtml(task.downloaded_total || 0)}</td>
             <td class="metric">${escapeHtml(task.pending_total || 0)}</td>
@@ -503,9 +904,14 @@
   }
 
   function renderDashboard(tasks) {
+    if (!Array.isArray(tasks)) {
+      currentData = null;
+      return;
+    }
     renderSummary(tasks);
     renderTasks(tasks);
-    currentData = tasks;
+    currentData = tasks.slice();
+    updateEntriesCacheFromTasks(currentData);
   }
 
   function setGeneratedAt(value) {
@@ -586,6 +992,10 @@
     setAutoRefreshDisplay(autoRefreshValue);
     setGeneratedAt(config.generatedAt || null);
     initSearch();
+    initEntriesModal();
+    if (tableBody) {
+      tableBody.addEventListener("click", handleEntriesTriggerClick);
+    }
 
     if (initialData && initialData.length) {
       renderDashboard(initialData);

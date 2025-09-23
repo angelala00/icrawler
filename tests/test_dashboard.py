@@ -11,6 +11,7 @@ importlib.import_module("bs4")
 
 dashboard = importlib.import_module("icrawler.dashboard")
 collect_task_overviews = dashboard.collect_task_overviews
+create_dashboard_app = dashboard.create_dashboard_app
 render_dashboard_html = dashboard.render_dashboard_html
 
 from icrawler.crawler import safe_filename
@@ -60,7 +61,7 @@ def _create_state(state_path: str) -> None:
     save_state(state_path, state)
 
 
-def test_collect_task_overview(tmp_path) -> None:
+def _prepare_dashboard_environment(tmp_path):
     artifact_dir = tmp_path / "artifacts"
     downloads_dir = artifact_dir / "downloads"
     task_slug = safe_filename("Demo Task")
@@ -108,11 +109,28 @@ def test_collect_task_overview(tmp_path) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
+    return config_path, expected_time, task_slug
+
+
+def _get_app_route(app, path: str, method: str):
+    for route in app.routes:
+        if getattr(route, "path", None) != path:
+            continue
+        methods = getattr(route, "methods", set())
+        if methods and method.upper() in methods:
+            return route
+    raise AssertionError(f"Route {method} {path} not found")
+
+
+def test_collect_task_overview(tmp_path) -> None:
+    config_path, expected_time, task_slug = _prepare_dashboard_environment(tmp_path)
+
     overviews = collect_task_overviews(str(config_path))
     assert len(overviews) == 1
     overview = overviews[0]
 
     assert overview.name == "Demo Task"
+    assert overview.slug == task_slug
     assert overview.entries_total == 2
     assert overview.documents_total == 3
     assert overview.downloaded_total == 2
@@ -130,8 +148,50 @@ def test_collect_task_overview(tmp_path) -> None:
     assert overview.output_size_bytes == 8
     assert overview.status == "attention"
     assert "pending" in overview.status_reason
+    assert overview.entries is None
 
     html = render_dashboard_html(overviews, generated_at=expected_time, auto_refresh=10)
     assert "Demo Task" in html
     assert "pending download" in html
+
+    overviews_with_entries = collect_task_overviews(
+        str(config_path),
+        include_entries=True,
+    )
+    overview_with_entries = overviews_with_entries[0]
+    assert overview_with_entries.entries is not None
+    assert len(overview_with_entries.entries) == overview_with_entries.entries_total
+    assert overview_with_entries.entries[0]["title"] == "Entry 1"
+    overview_json = overview_with_entries.to_jsonable()
+    assert overview_json["slug"] == task_slug
+    assert "entries" in overview_json
+    assert len(overview_json["entries"]) == overview_with_entries.entries_total
+
+
+def test_entries_endpoint_returns_entries(tmp_path) -> None:
+    config_path, _, task_slug = _prepare_dashboard_environment(tmp_path)
+
+    app = create_dashboard_app(
+        str(config_path),
+        auto_refresh=30,
+        task=None,
+        artifact_dir_override=None,
+    )
+
+    tasks_route = _get_app_route(app, "/api/tasks", "GET")
+    tasks_response = tasks_route.endpoint()
+    assert tasks_response.status_code == 200
+    tasks_payload = json.loads(tasks_response.body.decode("utf-8"))
+    assert tasks_payload
+    assert tasks_payload[0]["slug"] == task_slug
+
+    slug = tasks_payload[0]["slug"]
+    entries_route = _get_app_route(app, "/api/tasks/{slug}/entries", "GET")
+    entries_response = entries_route.endpoint(slug=slug)
+    assert entries_response.status_code == 200
+    payload = json.loads(entries_response.body.decode("utf-8"))
+    assert payload["task"]["slug"] == slug
+    assert isinstance(payload["entries"], list)
+    assert len(payload["entries"]) == tasks_payload[0]["entries_total"]
+    assert payload["entries"][0]["title"] == "Entry 1"
 
