@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PBC Monitor Dashboard</title>
+    <link rel="stylesheet" href="style.css" />
+    <!--CONFIG_PLACEHOLDER-->
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>PBC Monitor Dashboard</h1>
+      <p>
+        Last updated <span data-generated-at>—</span>. Auto refresh every
+        <span data-auto-refresh>—</span> second(s).
+      </p>
+    </header>
+    <main>
+      <section class="summary" id="summary"></section>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>Task</th>
+              <th>Entries</th>
+              <th>Documents</th>
+              <th>Downloaded</th>
+              <th>Pending</th>
+              <th>Tracked files</th>
+              <th>Status</th>
+              <th>Last update</th>
+              <th>Next window</th>
+              <th>Listing cache</th>
+              <th>Downloads</th>
+              <th>File types</th>
+            </tr>
+          </thead>
+          <tbody id="tasks-body">
+            <tr>
+              <td colspan="12" class="empty">Loading…</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="message hidden" id="status-message"></div>
+    </main>
+    <footer>
+      PBC Monitor dashboard &middot; Generated at
+      <span data-generated-at>—</span>
+    </footer>
+    <script src="main.js" defer></script>
+  </body>
+</html>

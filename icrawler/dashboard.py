@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import json
+import mimetypes
 import os
 import socket
 import sys
@@ -10,6 +12,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 from urllib.parse import urlsplit
 
@@ -22,6 +25,9 @@ from .runner import (
     _prepare_task_layout,
 )
 from .state import PBCState
+
+
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
 @dataclass
@@ -270,225 +276,65 @@ def collect_task_overviews(
     return overviews
 
 
+def _load_index_template() -> str:
+    if not WEB_DIR.exists():
+        raise FileNotFoundError(
+            "The web directory does not exist. Expected frontend assets in 'web/'."
+        )
+    template_path = WEB_DIR / "index.html"
+    if not template_path.is_file():
+        raise FileNotFoundError(
+            "The dashboard front-end template 'web/index.html' was not found."
+        )
+    return template_path.read_text(encoding="utf-8")
+
+
+@functools.lru_cache(maxsize=1)
+def _cached_index_template() -> str:
+    return _load_index_template()
+
+
+def _render_index_html(
+    *,
+    auto_refresh: Optional[int],
+    generated_at: datetime,
+    initial_data: Optional[Iterable[TaskOverview]] = None,
+    static_snapshot: bool = False,
+    api_base: str = "",
+) -> str:
+    template = _cached_index_template()
+    config: Dict[str, object] = {
+        "autoRefresh": auto_refresh if auto_refresh and auto_refresh > 0 else None,
+        "generatedAt": generated_at.isoformat(timespec="seconds"),
+        "staticSnapshot": static_snapshot,
+        "apiBase": api_base,
+    }
+    if initial_data is not None:
+        config["initialData"] = [overview.to_jsonable() for overview in initial_data]
+
+    config_script = (
+        "<script>window.__PBC_CONFIG__ = "
+        + json.dumps(config, ensure_ascii=False)
+        + "</script>"
+    )
+    return template.replace("<!--CONFIG_PLACEHOLDER-->", config_script)
+
+
 def render_dashboard_html(
     overviews: Iterable[TaskOverview],
     *,
     generated_at: Optional[datetime] = None,
     auto_refresh: Optional[int] = 30,
 ) -> str:
+    """Render a standalone HTML snapshot of the dashboard."""
+
     generated_at = generated_at or datetime.now()
-    tasks = list(overviews)
-
-    total_entries = sum(task.entries_total for task in tasks)
-    total_documents = sum(task.documents_total for task in tasks)
-    total_pending = sum(task.pending_total for task in tasks)
-    total_tracked = sum(task.tracked_files for task in tasks)
-
-    meta_refresh = (
-        f'<meta http-equiv="refresh" content="{auto_refresh}">' if auto_refresh else ""
+    return _render_index_html(
+        auto_refresh=auto_refresh,
+        generated_at=generated_at,
+        initial_data=list(overviews),
+        static_snapshot=True,
     )
-
-    def _format_dt(value: Optional[datetime]) -> str:
-        if value is None:
-            return "—"
-        return value.strftime("%Y-%m-%d %H:%M:%S")
-
-    rows: List[str] = []
-    for task in tasks:
-        document_types = ", ".join(
-            f"{key}:{value}" for key, value in sorted(task.document_type_counts.items())
-        )
-        if not document_types:
-            document_types = "—"
-
-        next_run = "—"
-        if task.next_run_earliest and task.next_run_latest:
-            next_run = (
-                f"{_format_dt(task.next_run_earliest)} ↔ { _format_dt(task.next_run_latest) }"
-            )
-
-        status_class = {
-            "ok": "status-ok",
-            "attention": "status-attention",
-            "waiting": "status-waiting",
-            "stale": "status-stale",
-        }.get(task.status, "status-waiting")
-
-        url_html = "—"
-        if task.start_url:
-            display_url, full_url = _summarize_url(task.start_url)
-            url_html = (
-                f"<a href=\"{_escape(task.start_url)}\" target=\"_blank\" rel=\"noopener\" "
-                f"title=\"{_escape(full_url)}\">"
-                f"<span class=\"url-text\">{_escape(display_url)}</span>"
-                "<span class=\"external-icon\" aria-hidden=\"true\">↗</span>"
-                "</a>"
-            )
-
-        rows.append(
-            """
-            <tr>
-              <td class="task-name">
-                <div class="name">{name}</div>
-                <div class="url">{url}</div>
-              </td>
-              <td class="metric">{entries}</td>
-              <td class="metric">{documents}</td>
-              <td class="metric">{downloaded}</td>
-              <td class="metric">{pending}</td>
-              <td class="metric">{tracked}</td>
-              <td class="status-cell">{status}</td>
-              <td class="datetime">{state_time}</td>
-              <td class="datetime">{next_run}</td>
-              <td class="cache">{cache_info}</td>
-              <td class="output">{output}</td>
-              <td class="doc-types">{doc_types}</td>
-            </tr>
-            """.format(
-                name=_escape(task.name),
-                url=url_html,
-                entries=task.entries_total,
-                documents=task.documents_total,
-                downloaded=task.downloaded_total,
-                pending=task.pending_total,
-                tracked=task.tracked_files,
-                status=f"<span class='{status_class}'>{_escape(task.status_reason)}</span>",
-                state_time=_escape(_format_dt(task.state_last_updated)),
-                next_run=_escape(next_run),
-                cache_info=_escape(
-                    f"{task.pages_cached} pages" + (
-                        " (fresh today)" if task.page_cache_fresh else ""
-                    )
-                ),
-                output=_escape(
-                    f"{task.output_files} files / {task.output_size_bytes} bytes"
-                ),
-                doc_types=_escape(document_types),
-            )
-        )
-
-    rows_html = "\n".join(rows) if rows else "<tr><td colspan='12' class='empty'>No tasks found</td></tr>"
-
-    summary_cards = f"""
-    <div class="summary">
-      <div class="card"><div class="label">Tasks</div><div class="value">{len(tasks)}</div></div>
-      <div class="card"><div class="label">Entries</div><div class="value">{total_entries}</div></div>
-      <div class="card"><div class="label">Documents</div><div class="value">{total_documents}</div></div>
-      <div class="card"><div class="label">Pending</div><div class="value">{total_pending}</div></div>
-      <div class="card"><div class="label">Tracked files</div><div class="value">{total_tracked}</div></div>
-    </div>
-    """
-
-    return f"""
-    <!DOCTYPE html>
-    <html lang='en'>
-    <head>
-      <meta charset='utf-8'>
-      {meta_refresh}
-      <title>PBC Monitor Dashboard</title>
-      <style>
-        body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; margin: 0; background: #f4f6fb; color: #1f2933; }}
-        header {{ background: #1f2a44; color: white; padding: 1.5rem; }}
-        header h1 {{ margin: 0 0 0.5rem 0; font-size: 1.75rem; }}
-        header p {{ margin: 0; opacity: 0.85; }}
-        main {{ padding: 1.5rem; }}
-        .summary {{ display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }}
-        .summary .card {{ background: white; padding: 1rem 1.5rem; border-radius: 0.75rem; box-shadow: 0 10px 30px rgba(31, 42, 68, 0.12); min-width: 120px; }}
-        .summary .label {{ font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6b7a90; margin-bottom: 0.5rem; }}
-        .summary .value {{ font-size: 1.5rem; font-weight: 600; }}
-        .table-wrapper {{ width: 100%; overflow-x: auto; }}
-        table {{ width: 100%; border-collapse: collapse; background: white; border-radius: 0.75rem; overflow: hidden; box-shadow: 0 20px 40px rgba(31, 42, 68, 0.1); min-width: 960px; }}
-        thead {{ background: #f0f4ff; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.75rem; color: #55627a; }}
-        th {{ padding: 0.75rem 1rem; text-align: left; white-space: nowrap; }}
-        td {{ padding: 0.75rem 1rem; border-top: 1px solid #e3e8f2; vertical-align: top; word-break: break-word; overflow-wrap: anywhere; }}
-        tr:hover {{ background: #f8faff; }}
-        .task-name {{ max-width: 18rem; display: flex; flex-direction: column; gap: 0.2rem; }}
-        .task-name .name {{ font-weight: 600; line-height: 1.3; }}
-        .task-name .url {{ font-size: 0.85rem; color: #2563eb; overflow: hidden; word-break: normal; overflow-wrap: normal; }}
-        .task-name .url a {{ color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 0.35rem; max-width: 100%; }}
-        .task-name .url a .url-text {{ overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-        .task-name .url .external-icon {{ font-size: 0.8rem; color: #94a3b8; flex-shrink: 0; }}
-        .task-name .url a:hover {{ text-decoration: underline; }}
-        td.metric {{ white-space: nowrap; font-variant-numeric: tabular-nums; }}
-        td.status-cell {{ min-width: 9rem; }}
-        td.datetime {{ min-width: 11rem; white-space: normal; }}
-        td.cache, td.output, td.doc-types {{ max-width: 16rem; white-space: normal; }}
-        .status-ok {{ color: #059669; font-weight: 600; }}
-        .status-attention {{ color: #d97706; font-weight: 600; }}
-        .status-waiting {{ color: #6b7280; font-weight: 600; }}
-        .status-stale {{ color: #ef4444; font-weight: 600; }}
-        td.empty {{ text-align: center; padding: 2rem; color: #6b7280; }}
-        footer {{ padding: 1rem 1.5rem 2rem; color: #6b7280; font-size: 0.9rem; }}
-      </style>
-    </head>
-    <body>
-      <header>
-        <h1>PBC Monitor Dashboard</h1>
-        <p>Last updated {generated_at.strftime("%Y-%m-%d %H:%M:%S")}. Auto refresh every {auto_refresh if auto_refresh else '∞'} second(s).</p>
-      </header>
-      <main>
-        {summary_cards}
-        <div class="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Task</th>
-                <th>Entries</th>
-                <th>Documents</th>
-                <th>Downloaded</th>
-                <th>Pending</th>
-                <th>Tracked files</th>
-                <th>Status</th>
-                <th>Last update</th>
-                <th>Next window</th>
-                <th>Listing cache</th>
-                <th>Downloads</th>
-                <th>File types</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows_html}
-            </tbody>
-          </table>
-        </div>
-      </main>
-      <footer>
-        PBC Monitor dashboard &middot; Generated at {generated_at.strftime("%Y-%m-%d %H:%M:%S")}
-      </footer>
-    </body>
-    </html>
-    """
-
-
-def _escape(value: str) -> str:
-    import html
-
-    return html.escape(value, quote=True)
-
-
-def _summarize_url(url: str) -> tuple[str, str]:
-    try:
-        parsed = urlsplit(url)
-    except ValueError:
-        return url, url
-
-    host = parsed.netloc
-    path = parsed.path or ""
-    if parsed.query:
-        path = f"{path}?{parsed.query}"
-    if parsed.fragment:
-        path = f"{path}#{parsed.fragment}"
-
-    display = (host + path) if host or path else url
-    if not display:
-        display = url
-
-    max_length = 60
-    if len(display) > max_length:
-        display = display[: max_length - 1] + "…"
-
-    return display, url
-
 
 def _serve_dashboard(
     config_path: str,
@@ -509,8 +355,29 @@ def _serve_dashboard(
             self.end_headers()
             self.wfile.write(content)
 
+        def _serve_static(self, path: str) -> None:
+            relative = path.lstrip("/")
+            if not relative:
+                relative = "index.html"
+            base_dir = WEB_DIR.resolve()
+            try:
+                target = (base_dir / relative).resolve()
+                target.relative_to(base_dir)
+            except ValueError:
+                self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+                return
+            if not target.is_file():
+                self.send_error(HTTPStatus.NOT_FOUND, "File not found")
+                return
+            content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+            data = target.read_bytes()
+            if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
+                content_type = f"{content_type}; charset=utf-8"
+            self._write(data, content_type)
+
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler interface
-            path = self.path.split("?", 1)[0]
+            parsed = urlsplit(self.path)
+            path = parsed.path or "/"
             if path == "/api/tasks":
                 try:
                     with overviews_lock:
@@ -538,32 +405,33 @@ def _serve_dashboard(
                 self._write(b"ok", "text/plain; charset=utf-8")
                 return
 
-            try:
-                with overviews_lock:
-                    overviews = collect_task_overviews(
-                        config_path,
-                        task=task,
-                        artifact_dir_override=artifact_dir_override,
-                    )
-                html = render_dashboard_html(
-                    overviews,
-                    generated_at=datetime.now(),
-                    auto_refresh=auto_refresh,
-                ).encode("utf-8")
+            if path in ("/", "/index.html"):
+                try:
+                    html = _render_index_html(
+                        auto_refresh=auto_refresh,
+                        generated_at=datetime.now(),
+                        api_base="",
+                    ).encode("utf-8")
+                except FileNotFoundError as exc:  # pragma: no cover - configuration issue
+                    message = f"Dashboard error: {exc}".encode("utf-8")
+                    self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("Content-Length", str(len(message)))
+                    self.end_headers()
+                    self.wfile.write(message)
+                    return
                 self._write(html)
-            except Exception as exc:  # pragma: no cover - logged to client
-                message = f"Dashboard error: {exc}".encode("utf-8")
-                self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.send_header("Content-Length", str(len(message)))
-                self.end_headers()
-                self.wfile.write(message)
+                return
+
+            self._serve_static(path)
 
         def log_message(self, format: str, *args: object) -> None:  # noqa: A003 - BaseHTTPRequestHandler signature
             sys.stderr.write(
                 "%s - - [%s] %s\n"
                 % (self.address_string(), self.log_date_time_string(), format % args)
             )
+
+
 
     with HTTPServer((host, port), DashboardHandler) as httpd:
         address = httpd.server_address
