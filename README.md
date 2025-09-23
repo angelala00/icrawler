@@ -97,7 +97,7 @@ You can override these via config (`state_file` / `structure_file`) or CLI
 Run the lightweight dashboard to visualise the status of every configured task:
 
 ```
-python -m icrawler.dashboard --config pbc_config.json
+python -m icrawler.dashboard
 ```
 
 The page shows, for each task, the number of entries/documents tracked,
