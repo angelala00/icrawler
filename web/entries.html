@@ -19,6 +19,27 @@
     <main class="entries-main">
       <section class="entries-card">
         <div class="entries-card__meta" id="entries-meta"></div>
+        <section class="entries-filters hidden" id="entries-filters" aria-label="条目筛选">
+          <header class="entries-filters__header">
+            <h2>筛选条件</h2>
+            <p>点击标签快速筛选任务或特殊类型的条目。</p>
+          </header>
+          <div class="entries-filters__groups">
+            <div class="entries-filters__group" id="entries-filter-slugs" aria-live="polite">
+              <span class="entries-filters__label">任务标识</span>
+              <div class="entries-filters__tags" id="entries-slug-tags"></div>
+              <p class="entries-filters__hint">可多选；未选择任何标签时显示全部任务。</p>
+            </div>
+            <div class="entries-filters__group">
+              <span class="entries-filters__label">条目类型</span>
+              <div class="entries-filters__tags">
+                <button type="button" class="entries-filter-tag" data-filter="abolish" id="entries-filter-abolish">
+                  包含“废止”的制度
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
         <div class="message hidden" id="entries-message"></div>
         <div class="entries-body" id="entries-body">
           <p class="empty">正在加载条目…</p>
