@@ -317,22 +317,39 @@ def collect_task_overviews(
     return overviews
 
 
-def _load_index_template() -> str:
+def _load_template(filename: str) -> str:
     if not WEB_DIR.exists():
         raise FileNotFoundError(
             "The web directory does not exist. Expected frontend assets in 'web/'."
         )
-    template_path = WEB_DIR / "index.html"
+    template_path = WEB_DIR / filename
     if not template_path.is_file():
         raise FileNotFoundError(
-            "The dashboard front-end template 'web/index.html' was not found."
+            f"The dashboard front-end template 'web/{filename}' was not found."
         )
     return template_path.read_text(encoding="utf-8")
 
 
-@functools.lru_cache(maxsize=1)
+@functools.lru_cache(maxsize=None)
+def _cached_template(filename: str) -> str:
+    return _load_template(filename)
+
+
 def _cached_index_template() -> str:
-    return _load_index_template()
+    return _cached_template("index.html")
+
+
+def _cached_entries_template() -> str:
+    return _cached_template("entries.html")
+
+
+def _render_template_with_config(template: str, config: Dict[str, object]) -> str:
+    config_script = (
+        "<script>window.__PBC_CONFIG__ = "
+        + json.dumps(config, ensure_ascii=False)
+        + "</script>"
+    )
+    return template.replace("<!--CONFIG_PLACEHOLDER-->", config_script)
 
 
 def _render_index_html(
@@ -356,12 +373,19 @@ def _render_index_html(
     if search_config is not None:
         config["search"] = search_config
 
-    config_script = (
-        "<script>window.__PBC_CONFIG__ = "
-        + json.dumps(config, ensure_ascii=False)
-        + "</script>"
-    )
-    return template.replace("<!--CONFIG_PLACEHOLDER-->", config_script)
+    return _render_template_with_config(template, config)
+
+
+def _render_entries_html(
+    *, generated_at: datetime, static_snapshot: bool = False, api_base: str = ""
+) -> str:
+    template = _cached_entries_template()
+    config: Dict[str, object] = {
+        "generatedAt": generated_at.isoformat(timespec="seconds"),
+        "staticSnapshot": static_snapshot,
+        "apiBase": api_base,
+    }
+    return _render_template_with_config(template, config)
 
 
 def render_dashboard_html(
@@ -492,6 +516,17 @@ def create_dashboard_app(
             return HTMLResponse(message, status_code=500)
         return HTMLResponse(html)
 
+    def _render_entries_response() -> HTMLResponse:
+        try:
+            html = _render_entries_html(
+                generated_at=datetime.now(),
+                api_base="",
+            )
+        except FileNotFoundError as exc:  # pragma: no cover - configuration issue
+            message = f"Dashboard error: {exc}"
+            return HTMLResponse(message, status_code=500)
+        return HTMLResponse(html)
+
     @app.get("/")
     def index() -> HTMLResponse:
         return _render_index_response()
@@ -499,6 +534,14 @@ def create_dashboard_app(
     @app.get("/index.html")
     def index_html() -> HTMLResponse:
         return _render_index_response()
+
+    @app.get("/entries")
+    def entries_page() -> HTMLResponse:
+        return _render_entries_response()
+
+    @app.get("/entries.html")
+    def entries_html() -> HTMLResponse:
+        return _render_entries_response()
 
     @app.get("/{resource_path:path}", include_in_schema=False)
     def serve_static(resource_path: str) -> FileResponse:
