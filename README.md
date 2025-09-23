@@ -4,7 +4,37 @@ Simple Python-based web crawler that downloads PDF files and converts web
 pages to PDF. Provide seed URLs and the crawler will follow links on those
 pages, downloading linked PDFs or rendering HTML pages to PDF files.
 
-## Usage
+## Command Line Entrypoints
+
+### Unified portal (`python -m icrawler`)
+
+Launch the combined monitoring portal – a FastAPI app that surfaces the live
+dashboard and the policy search interface in one place:
+
+```
+python -m icrawler --host 0.0.0.0 --port 8000
+```
+
+By default the portal reads tasks from `pbc_config.json` and auto-refreshes
+every 30 seconds. Useful options:
+
+- `--config` / `--artifact-dir` / `--task` mirror the monitor CLI and scope the
+  data that is displayed.
+- `--refresh` controls the auto-refresh interval (set `0` to disable).
+- `--disable-search` turns off the policy finder UI entirely.
+- `--search-policy-updates` / `--search-regulator-notice` let you point the
+  search index at explicit `state.json` paths when auto-discovery is not
+  sufficient.
+- `--search-default-topk` and `--search-max-topk` adjust the default/maximum
+  result counts returned from the `/api/search` endpoint and the UI.
+- `--once` renders the HTML snapshot once and exits; `--json` dumps the current
+  task overview as JSON.
+
+When the portal detects that the required state files are missing it keeps the
+search tab visible but shows a message explaining why it is disabled. This
+command is equivalent to the old `python -m icrawler.dashboard` behaviour.
+
+### PDF crawler (`python -m icrawler.crawler`)
 
 ```
 python -m icrawler.crawler [--delay N] [--jitter M] <output_dir> <url1> [<url2> ...]
@@ -92,18 +122,19 @@ State tracking and structure snapshots also adopt per-task defaults:
 You can override these via config (`state_file` / `structure_file`) or CLI
 (`--state-file`, `--build-page-structure`, `--download-from-structure`).
 
-### Monitoring Dashboard
+### Monitoring dashboard (`python -m icrawler.dashboard`)
 
-Run the lightweight dashboard to visualise the status of every configured task:
+Run the streamlined status board without the search tab:
 
 ```
 python -m icrawler.dashboard
 ```
 
-The page shows, for each task, the number of entries/documents tracked,
-download progress, cached listing freshness, last update time, and the next
-scheduled monitoring window. It refreshes automatically (default 30 seconds)
-and also exposes a JSON API at `/api/tasks` for automation or custom widgets.
+This entry point only serves the monitoring metrics (task progress, download
+counts, cache freshness, scheduling windows, etc.) and exposes the same
+`/api/tasks` JSON endpoint for automation. Search is intentionally disabled
+here – use the unified portal (`python -m icrawler`) if you need the embedded
+policy finder.
 
 Useful flags:
 
