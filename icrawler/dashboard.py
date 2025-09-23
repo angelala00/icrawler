@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional
-from urllib.parse import urlsplit
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import parse_qs, urlsplit
 
 from . import pbc_monitor as core
 from .fetching import build_cache_path_for_url
@@ -25,9 +25,13 @@ from .runner import (
     _prepare_task_layout,
 )
 from .state import PBCState
+from searcher.policy_finder import Entry, PolicyFinder, default_state_path
 
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+
+DEFAULT_SEARCH_TOPK = 5
+MAX_SEARCH_TOPK = 50
 
 
 @dataclass
@@ -301,6 +305,7 @@ def _render_index_html(
     initial_data: Optional[Iterable[TaskOverview]] = None,
     static_snapshot: bool = False,
     api_base: str = "",
+    search_config: Optional[Dict[str, object]] = None,
 ) -> str:
     template = _cached_index_template()
     config: Dict[str, object] = {
@@ -311,6 +316,8 @@ def _render_index_html(
     }
     if initial_data is not None:
         config["initialData"] = [overview.to_jsonable() for overview in initial_data]
+    if search_config is not None:
+        config["search"] = search_config
 
     config_script = (
         "<script>window.__PBC_CONFIG__ = "
@@ -325,6 +332,7 @@ def render_dashboard_html(
     *,
     generated_at: Optional[datetime] = None,
     auto_refresh: Optional[int] = 30,
+    search_config: Optional[Dict[str, object]] = None,
 ) -> str:
     """Render a standalone HTML snapshot of the dashboard."""
 
@@ -334,7 +342,103 @@ def render_dashboard_html(
         generated_at=generated_at,
         initial_data=list(overviews),
         static_snapshot=True,
+        search_config=search_config
+        if search_config is not None
+        else {"enabled": False, "reason": "Search is unavailable in static snapshots."},
     )
+
+
+def _resolve_state_path(task_name: str, override: Optional[str]) -> Path:
+    script_dir = Path(__file__).resolve().parent
+    if override:
+        candidate = Path(override).expanduser()
+    else:
+        candidate = default_state_path(task_name, script_dir)
+    if not candidate.exists():
+        alternative = Path("/mnt/data") / candidate.name
+        if alternative.exists():
+            return alternative
+    return candidate
+
+
+def _prepare_policy_finder(
+    *,
+    disable_search: bool,
+    policy_updates_path: Optional[str],
+    regulator_notice_path: Optional[str],
+) -> Tuple[Optional[PolicyFinder], Optional[str]]:
+    if disable_search:
+        return None, "Search disabled by configuration"
+
+    resolved_policy_updates = _resolve_state_path("policy_updates", policy_updates_path)
+    resolved_regulator_notice = _resolve_state_path(
+        "regulator_notice", regulator_notice_path
+    )
+
+    missing: List[str] = []
+    for resolved in (resolved_policy_updates, resolved_regulator_notice):
+        if not resolved.exists():
+            missing.append(str(resolved))
+    if missing:
+        return None, "Missing search state file(s): " + ", ".join(missing)
+
+    try:
+        finder = PolicyFinder(
+            str(resolved_policy_updates),
+            str(resolved_regulator_notice),
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        return None, f"Failed to load search index: {exc}"
+
+    return finder, None
+
+
+def _coerce_search_topk(
+    value: Any,
+    *,
+    default: int = DEFAULT_SEARCH_TOPK,
+    limit: int = MAX_SEARCH_TOPK,
+) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError("Boolean is not valid for topk")
+    if isinstance(value, (int, float)):
+        candidate = int(value)
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        candidate = int(stripped)
+    else:
+        raise ValueError("Unsupported type for topk")
+    if candidate <= 0:
+        raise ValueError("topk must be positive")
+    return max(1, min(limit, candidate))
+
+
+def _coerce_search_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(int(value))
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    raise ValueError("Invalid boolean value")
+
+
+def _search_entry_payload(
+    entry: Entry, score: float, include_documents: bool
+) -> Dict[str, Any]:
+    payload = entry.to_dict(include_documents=include_documents)
+    payload["score"] = score
+    return payload
 
 def _serve_dashboard(
     config_path: str,
@@ -344,16 +448,69 @@ def _serve_dashboard(
     auto_refresh: int,
     task: Optional[str],
     artifact_dir_override: Optional[str],
+    policy_finder: Optional[PolicyFinder],
+    search_settings: Dict[str, object],
 ) -> None:
     overviews_lock = threading.Lock()
 
+    search_default_topk = int(search_settings.get("default_topk", DEFAULT_SEARCH_TOPK))
+    search_max_topk = int(search_settings.get("max_topk", MAX_SEARCH_TOPK))
+    if search_default_topk <= 0:
+        search_default_topk = DEFAULT_SEARCH_TOPK
+    if search_max_topk <= 0:
+        search_max_topk = MAX_SEARCH_TOPK
+    if search_default_topk > search_max_topk:
+        search_default_topk = max(1, min(search_default_topk, search_max_topk))
+
+    search_include_documents = bool(search_settings.get("include_documents", True))
+    search_reason = search_settings.get("reason")
+
+    search_config_payload: Dict[str, object] = {
+        "enabled": policy_finder is not None,
+        "endpoint": "/api/search",
+        "defaultTopk": search_default_topk,
+        "maxTopk": search_max_topk,
+        "includeDocuments": search_include_documents,
+    }
+    if policy_finder is None and isinstance(search_reason, str):
+        search_config_payload["reason"] = search_reason
+
     class DashboardHandler(BaseHTTPRequestHandler):
-        def _write(self, content: bytes, content_type: str = "text/html; charset=utf-8") -> None:
-            self.send_response(HTTPStatus.OK)
+        search_finder = policy_finder
+        search_default_topk = search_default_topk
+        search_max_topk = search_max_topk
+        search_include_documents = search_include_documents
+        search_reason = search_reason
+        search_config_payload = search_config_payload
+
+        def _write(
+            self,
+            content: bytes,
+            content_type: str = "text/html; charset=utf-8",
+            *,
+            status: HTTPStatus = HTTPStatus.OK,
+            extra_headers: Optional[Dict[str, str]] = None,
+        ) -> None:
+            self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(content)))
+            if extra_headers:
+                for key, value in extra_headers.items():
+                    self.send_header(key, value)
             self.end_headers()
             self.wfile.write(content)
+
+        def _json_response(
+            self, payload: object, *, status: HTTPStatus = HTTPStatus.OK
+        ) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            headers = {"Access-Control-Allow-Origin": "*"}
+            self._write(
+                body,
+                "application/json; charset=utf-8",
+                status=status,
+                extra_headers=headers,
+            )
 
         def _serve_static(self, path: str) -> None:
             relative = path.lstrip("/")
@@ -375,6 +532,42 @@ def _serve_dashboard(
                 content_type = f"{content_type}; charset=utf-8"
             self._write(data, content_type)
 
+        def _search_disabled_response(self) -> None:
+            payload: Dict[str, object] = {"error": "search_disabled"}
+            if isinstance(self.search_reason, str):
+                payload["reason"] = self.search_reason
+            self._json_response(payload, status=HTTPStatus.NOT_FOUND)
+
+        def _handle_search(self, query: str, topk: int, include_documents: bool) -> None:
+            if self.search_finder is None:
+                self._search_disabled_response()
+                return
+            results = [
+                _search_entry_payload(entry, score, include_documents)
+                for entry, score in self.search_finder.search(query, topk=topk)
+            ]
+            self._json_response(
+                {
+                    "query": query,
+                    "topk": topk,
+                    "include_documents": include_documents,
+                    "result_count": len(results),
+                    "results": results,
+                }
+            )
+
+        def do_OPTIONS(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler interface
+            parsed = urlsplit(self.path)
+            if parsed.path == "/api/search":
+                self.send_response(HTTPStatus.NO_CONTENT)
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                self.end_headers()
+                return
+            self.send_response(HTTPStatus.NOT_FOUND)
+            self.end_headers()
+
         def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler interface
             parsed = urlsplit(self.path)
             path = parsed.path or "/"
@@ -386,23 +579,61 @@ def _serve_dashboard(
                             task=task,
                             artifact_dir_override=artifact_dir_override,
                         )
-                    payload = json.dumps(
-                        [overview.to_jsonable() for overview in overviews],
-                        ensure_ascii=False,
-                        indent=2,
-                    ).encode("utf-8")
-                    self._write(payload, "application/json; charset=utf-8")
+                    payload = [overview.to_jsonable() for overview in overviews]
+                    self._json_response(payload)
                 except Exception as exc:  # pragma: no cover - logged to client
-                    message = json.dumps({"error": str(exc)}).encode("utf-8")
-                    self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                    self.send_header("Content-Type", "application/json; charset=utf-8")
-                    self.send_header("Content-Length", str(len(message)))
-                    self.end_headers()
-                    self.wfile.write(message)
+                    self._json_response(
+                        {"error": str(exc)},
+                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
+                    )
                 return
 
             if path == "/healthz":
                 self._write(b"ok", "text/plain; charset=utf-8")
+                return
+
+            if path == "/api/search":
+                if self.search_finder is None:
+                    self._search_disabled_response()
+                    return
+                params = parse_qs(parsed.query or "")
+                query_values = params.get("query") or params.get("q")
+                if not query_values or not query_values[0].strip():
+                    self._json_response(
+                        {"error": "missing_query"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                query = query_values[0].strip()
+                topk_param = params.get("topk", [None])[0]
+                try:
+                    topk = _coerce_search_topk(
+                        topk_param,
+                        default=self.search_default_topk,
+                        limit=self.search_max_topk,
+                    )
+                except Exception:
+                    self._json_response(
+                        {"error": "invalid_topk"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+
+                include_documents = self.search_include_documents
+                include_param = params.get("include_documents") or params.get("documents")
+                if include_param and include_param[0] is not None:
+                    try:
+                        parsed_bool = _coerce_search_bool(include_param[0])
+                    except Exception:
+                        self._json_response(
+                            {"error": "invalid_include_documents"},
+                            status=HTTPStatus.BAD_REQUEST,
+                        )
+                        return
+                    if parsed_bool is not None:
+                        include_documents = parsed_bool
+
+                self._handle_search(query, topk, include_documents)
                 return
 
             if path in ("/", "/index.html"):
@@ -411,6 +642,7 @@ def _serve_dashboard(
                         auto_refresh=auto_refresh,
                         generated_at=datetime.now(),
                         api_base="",
+                        search_config=self.search_config_payload,
                     ).encode("utf-8")
                 except FileNotFoundError as exc:  # pragma: no cover - configuration issue
                     message = f"Dashboard error: {exc}".encode("utf-8")
@@ -425,13 +657,85 @@ def _serve_dashboard(
 
             self._serve_static(path)
 
+        def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler interface
+            parsed = urlsplit(self.path)
+            if parsed.path != "/api/search":
+                self._json_response({"error": "not_found"}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            if self.search_finder is None:
+                self._search_disabled_response()
+                return
+
+            content_length = self.headers.get("Content-Length")
+            try:
+                length = int(content_length) if content_length else 0
+            except ValueError:
+                self._json_response(
+                    {"error": "invalid_content_length"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            data = self.rfile.read(length) if length > 0 else b""
+            if not data:
+                self._json_response(
+                    {"error": "empty_body"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            try:
+                payload = json.loads(data.decode("utf-8"))
+            except json.JSONDecodeError:
+                self._json_response(
+                    {"error": "invalid_json"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            query = payload.get("query") or payload.get("q")
+            if not isinstance(query, str) or not query.strip():
+                self._json_response(
+                    {"error": "missing_query"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+            query = query.strip()
+
+            try:
+                topk = _coerce_search_topk(
+                    payload.get("topk"),
+                    default=self.search_default_topk,
+                    limit=self.search_max_topk,
+                )
+            except Exception:
+                self._json_response(
+                    {"error": "invalid_topk"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            include_documents = self.search_include_documents
+            if "include_documents" in payload:
+                try:
+                    parsed_bool = _coerce_search_bool(payload.get("include_documents"))
+                except Exception:
+                    self._json_response(
+                        {"error": "invalid_include_documents"},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
+                if parsed_bool is not None:
+                    include_documents = parsed_bool
+
+            self._handle_search(query, topk, include_documents)
+
         def log_message(self, format: str, *args: object) -> None:  # noqa: A003 - BaseHTTPRequestHandler signature
             sys.stderr.write(
                 "%s - - [%s] %s\n"
                 % (self.address_string(), self.log_date_time_string(), format % args)
             )
-
-
 
     with HTTPServer((host, port), DashboardHandler) as httpd:
         address = httpd.server_address
@@ -471,6 +775,31 @@ def main(argv: Optional[List[str]] = None) -> None:
         action="store_true",
         help="Output the collected overview as JSON and exit",
     )
+    parser.add_argument(
+        "--disable-search",
+        action="store_true",
+        help="Disable the policy search interface",
+    )
+    parser.add_argument(
+        "--search-policy-updates",
+        help="Path to the policy_updates state JSON for the search interface",
+    )
+    parser.add_argument(
+        "--search-regulator-notice",
+        help="Path to the regulator_notice state JSON for the search interface",
+    )
+    parser.add_argument(
+        "--search-default-topk",
+        type=int,
+        default=DEFAULT_SEARCH_TOPK,
+        help="Default top-k value used when searching",
+    )
+    parser.add_argument(
+        "--search-max-topk",
+        type=int,
+        default=MAX_SEARCH_TOPK,
+        help="Maximum allowed top-k when searching",
+    )
 
     args = parser.parse_args(argv)
 
@@ -493,6 +822,27 @@ def main(argv: Optional[List[str]] = None) -> None:
         print(json.dumps([overview.to_jsonable() for overview in overviews], ensure_ascii=False, indent=2))
         return
 
+    search_default_topk = (
+        args.search_default_topk
+        if isinstance(args.search_default_topk, int) and args.search_default_topk > 0
+        else DEFAULT_SEARCH_TOPK
+    )
+    search_max_topk = (
+        args.search_max_topk
+        if isinstance(args.search_max_topk, int) and args.search_max_topk > 0
+        else MAX_SEARCH_TOPK
+    )
+    if search_default_topk > search_max_topk:
+        search_default_topk = min(search_default_topk, search_max_topk)
+
+    policy_finder, search_error = _prepare_policy_finder(
+        disable_search=args.disable_search,
+        policy_updates_path=args.search_policy_updates,
+        regulator_notice_path=args.search_regulator_notice,
+    )
+    if search_error and not args.disable_search:
+        print(f"[dashboard] Search interface disabled: {search_error}", file=sys.stderr)
+
     _serve_dashboard(
         config_path,
         args.host,
@@ -500,6 +850,13 @@ def main(argv: Optional[List[str]] = None) -> None:
         auto_refresh=args.refresh,
         task=args.task,
         artifact_dir_override=args.artifact_dir,
+        policy_finder=policy_finder,
+        search_settings={
+            "default_topk": search_default_topk,
+            "max_topk": search_max_topk,
+            "include_documents": True,
+            "reason": search_error,
+        },
     )
 
 
