@@ -346,6 +346,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         config_path,
         task=args.task,
         artifact_dir_override=args.artifact_dir,
+        include_entries=args.once,
     )
 
     if args.once and args.json:

@@ -7,12 +7,14 @@ import os
 import socket
 import sys
 import threading
-from dataclasses import dataclass, asdict
+from collections import defaultdict
+from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from . import pbc_monitor as core
+from .crawler import safe_filename
 from .fetching import build_cache_path_for_url
 from .runner import (
     _build_tasks,
@@ -48,6 +50,7 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 @dataclass
 class TaskOverview:
     name: str
+    slug: str
     start_url: str
     entries_total: int
     documents_total: int
@@ -76,6 +79,7 @@ class TaskOverview:
     status: str
     status_reason: str
     parser_spec: Optional[str]
+    entries: Optional[List[Dict[str, object]]] = None
 
     def to_jsonable(self) -> Dict[str, object]:
         def _dt(value: Optional[datetime]) -> Optional[str]:
@@ -88,7 +92,17 @@ class TaskOverview:
         data["page_cache_last_fetch"] = _dt(self.page_cache_last_fetch)
         data["next_run_earliest"] = _dt(self.next_run_earliest)
         data["next_run_latest"] = _dt(self.next_run_latest)
+        if self.entries is None:
+            data.pop("entries", None)
         return data
+
+
+def _make_task_slug(name: str, counts: Dict[str, int]) -> str:
+    base = safe_filename(name) or "task"
+    counts[base] += 1
+    if counts[base] > 1:
+        return f"{base}-{counts[base]}"
+    return base
 
 
 def _default_runner_args(task: Optional[str] = None) -> argparse.Namespace:
@@ -192,6 +206,7 @@ def collect_task_overviews(
     *,
     task: Optional[str] = None,
     artifact_dir_override: Optional[str] = None,
+    include_entries: bool = False,
 ) -> List[TaskOverview]:
     config = _load_config(config_path)
     if artifact_dir_override:
@@ -200,8 +215,10 @@ def collect_task_overviews(
     runner_args = _default_runner_args(task)
     tasks = _build_tasks(runner_args, config, artifact_dir)
     overviews: List[TaskOverview] = []
+    slug_counts: Dict[str, int] = defaultdict(int)
 
     for spec in tasks:
+        slug = _make_task_slug(spec.name, slug_counts)
         layout = _prepare_task_layout(spec, runner_args, config, artifact_dir)
         http_options = _prepare_http_options(spec, runner_args, config)
         _ = _prepare_cache_behavior(spec, runner_args, config)
@@ -255,8 +272,16 @@ def collect_task_overviews(
 
         status, reason = _compute_status(entries_total, pending_total, page_cache_fresh, pages_cached)
 
+        entries_payload: Optional[List[Dict[str, object]]] = None
+        if include_entries:
+            jsonable = state.to_jsonable()
+            entries = jsonable.get("entries") if isinstance(jsonable, dict) else None
+            if isinstance(entries, list):
+                entries_payload = entries
+
         overview = TaskOverview(
             name=spec.name,
+            slug=slug,
             start_url=spec.start_url,
             entries_total=entries_total,
             documents_total=documents_total,
@@ -285,6 +310,7 @@ def collect_task_overviews(
             status=status,
             status_reason=reason,
             parser_spec=spec.parser_spec,
+            entries=entries_payload,
         )
         overviews.append(overview)
 
@@ -417,6 +443,38 @@ def create_dashboard_app(
         except Exception as exc:  # pragma: no cover - logged to client
             return JSONResponse({"error": str(exc)}, status_code=500)
 
+    @app.get("/api/tasks/{slug}/entries")
+    def get_task_entries(slug: str) -> JSONResponse:
+        try:
+            with overviews_lock:
+                overviews = collect_task_overviews(
+                    config_path,
+                    task=task,
+                    artifact_dir_override=artifact_dir_override,
+                )
+            overview = next((item for item in overviews if item.slug == slug), None)
+            if overview is None:
+                raise HTTPException(status_code=404, detail="Task not found")
+            if not overview.state_file:
+                return JSONResponse({"entries": [], "task": overview.to_jsonable()})
+            if overview.parser_spec:
+                module = core._load_parser_module(overview.parser_spec)
+            else:
+                module = core._load_parser_module(None)
+            core._set_parser_module(module)
+            state = core.load_state(overview.state_file, core.classify_document_type)
+            jsonable = state.to_jsonable()
+            entries = jsonable.get("entries") if isinstance(jsonable, dict) else None
+            payload = {
+                "entries": entries if isinstance(entries, list) else [],
+                "task": overview.to_jsonable(),
+            }
+            return JSONResponse(payload)
+        except HTTPException:
+            raise
+        except Exception as exc:  # pragma: no cover - logged to client
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
     @app.get("/healthz")
     def healthcheck() -> PlainTextResponse:
         return PlainTextResponse("ok")
@@ -516,6 +574,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         config_path,
         task=args.task,
         artifact_dir_override=args.artifact_dir,
+        include_entries=args.once,
     )
 
     disabled_search_config = {
