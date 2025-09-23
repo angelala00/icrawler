@@ -25,7 +25,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -112,6 +112,44 @@ def _search_payload(
     }
 
 
+def _parse_search_params(
+    params: Mapping[str, Any],
+    *,
+    query_error: str,
+    topk_error: str,
+    include_error: str,
+) -> Tuple[str, int, bool]:
+    query_text = ""
+    for key in ("query", "q"):
+        value = params.get(key)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                query_text = stripped
+                break
+    if not query_text:
+        raise ValueError(query_error)
+
+    try:
+        topk_value = _coerce_topk(params.get("topk"))
+    except Exception as exc:  # pragma: no cover - defensive branch
+        raise ValueError(topk_error) from exc
+
+    include_flag = True
+    include_value = params.get("include_documents")
+    if include_value is None:
+        include_value = params.get("documents")
+    if include_value is not None:
+        try:
+            parsed_bool = _coerce_bool(include_value)
+        except Exception as exc:  # pragma: no cover - defensive branch
+            raise ValueError(include_error) from exc
+        if parsed_bool is not None:
+            include_flag = parsed_bool
+
+    return query_text, topk_value, include_flag
+
+
 def create_app(finder: PolicyFinder) -> FastAPI:
     """Create and configure a FastAPI application for the policy finder."""
 
@@ -158,25 +196,22 @@ def create_app(finder: PolicyFinder) -> FastAPI:
         documents: Optional[str] = Query(None),
         finder_instance: PolicyFinder = Depends(get_finder),
     ) -> JSONResponse:
-        query_text = query or q or ""
-        query_text = query_text.strip()
-        if not query_text:
-            return bad_request("Missing 'query' parameter")
-
+        params = {
+            "query": query,
+            "q": q,
+            "topk": topk,
+            "include_documents": include_documents,
+            "documents": documents,
+        }
         try:
-            topk_value = _coerce_topk(topk)
-        except Exception:
-            return bad_request("Invalid 'topk' parameter")
-
-        include_flag = True
-        include_param = include_documents if include_documents is not None else documents
-        if include_param is not None:
-            try:
-                parsed_bool = _coerce_bool(include_param)
-            except Exception:
-                return bad_request("Invalid 'include_documents' parameter")
-            if parsed_bool is not None:
-                include_flag = parsed_bool
+            query_text, topk_value, include_flag = _parse_search_params(
+                params,
+                query_error="Missing 'query' parameter",
+                topk_error="Invalid 'topk' parameter",
+                include_error="Invalid 'include_documents' parameter",
+            )
+        except ValueError as exc:
+            return bad_request(str(exc))
 
         payload = _search_payload(finder_instance, query_text, topk_value, include_flag)
         return JSONResponse(status_code=200, content=payload)
@@ -198,25 +233,15 @@ def create_app(finder: PolicyFinder) -> FastAPI:
         if not isinstance(payload, dict):
             return bad_request("Request body must be a JSON object")
 
-        query_value = payload.get("query") or payload.get("q")
-        if not isinstance(query_value, str) or not query_value.strip():
-            return bad_request("Field 'query' is required")
-        query_text = query_value.strip()
-
         try:
-            topk_value = _coerce_topk(payload.get("topk"))
-        except Exception:
-            return bad_request("Field 'topk' must be a positive integer")
-
-        include_flag = True
-        include_key = "include_documents" if "include_documents" in payload else "documents"
-        if include_key in payload:
-            try:
-                parsed_bool = _coerce_bool(payload.get(include_key))
-            except Exception:
-                return bad_request("Field 'include_documents' must be boolean")
-            if parsed_bool is not None:
-                include_flag = parsed_bool
+            query_text, topk_value, include_flag = _parse_search_params(
+                payload,
+                query_error="Field 'query' is required",
+                topk_error="Field 'topk' must be a positive integer",
+                include_error="Field 'include_documents' must be boolean",
+            )
+        except ValueError as exc:
+            return bad_request(str(exc))
 
         payload_data = _search_payload(finder_instance, query_text, topk_value, include_flag)
         return JSONResponse(status_code=200, content=payload_data)
