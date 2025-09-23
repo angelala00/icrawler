@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>任务条目详情</title>
+    <link rel="stylesheet" href="style.css" />
+    <!--CONFIG_PLACEHOLDER-->
+  </head>
+  <body class="entries-page">
+    <header class="entries-header">
+      <div class="entries-header__top">
+        <a href="index.html" class="entries-header__back" id="entries-back-link">← 返回仪表盘</a>
+        <span class="entries-header__meta">数据生成时间 <span data-generated-at>—</span></span>
+      </div>
+      <h1 class="entries-header__title" id="entries-title">条目详情</h1>
+      <p class="entries-header__subtitle" id="entries-subtitle"></p>
+    </header>
+    <main class="entries-main">
+      <section class="entries-card">
+        <div class="entries-card__meta" id="entries-meta"></div>
+        <div class="message hidden" id="entries-message"></div>
+        <div class="entries-body" id="entries-body">
+          <p class="empty">正在加载条目…</p>
+        </div>
+      </section>
+    </main>
+    <footer class="entries-footer">
+      <a href="index.html" class="entries-footer__link">返回仪表盘首页</a>
+    </footer>
+    <script src="entries.js" defer></script>
+  </body>
+</html>

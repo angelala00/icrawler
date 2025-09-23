@@ -17,6 +17,35 @@
     </header>
     <main>
       <section class="summary" id="summary"></section>
+      <section class="task-filters" id="task-filters">
+        <div class="task-filters__header">
+          <h2>任务筛选</h2>
+          <p>按状态或关键字快速定位需要关注的任务。</p>
+        </div>
+        <form id="task-filter-form" class="filters-form" autocomplete="off">
+          <label class="filters-form__field filters-form__field--grow" for="task-filter-query">
+            关键字
+            <input
+              type="search"
+              id="task-filter-query"
+              name="query"
+              placeholder="按任务名称、标识或起始链接筛选"
+            />
+          </label>
+          <label class="filters-form__field" for="task-filter-status">
+            状态
+            <select id="task-filter-status" name="status">
+              <option value="all">全部状态</option>
+              <option value="ok">正常</option>
+              <option value="attention">关注</option>
+              <option value="waiting">等待</option>
+              <option value="stale">过期</option>
+            </select>
+          </label>
+          <button type="reset" class="filters-form__reset">重置</button>
+        </form>
+        <div class="filters-form__status" id="task-filter-status-text"></div>
+      </section>
       <div class="table-wrapper">
         <table>
           <thead>
@@ -86,30 +115,6 @@
           <li class="empty">输入关键词后开始检索。</li>
         </ol>
       </section>
-      <div
-        class="modal hidden"
-        id="entries-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="entries-modal-title"
-      >
-        <div class="modal__backdrop" data-close-modal></div>
-        <div class="modal__content" role="document">
-          <button
-            type="button"
-            class="modal__close"
-            id="entries-modal-close"
-            aria-label="关闭条目列表"
-          >
-            ×
-          </button>
-          <h2 class="modal__title" id="entries-modal-title">条目列表</h2>
-          <div class="modal__meta" id="entries-modal-meta"></div>
-          <div class="modal__body" id="entries-modal-body">
-            <p class="modal__empty">正在加载条目…</p>
-          </div>
-        </div>
-      </div>
     </main>
     <footer>
       PBC Monitor dashboard &middot; Generated at

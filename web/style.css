@@ -47,6 +47,93 @@ main {
   min-width: 120px;
 }
 
+.task-filters {
+  background: #fff;
+  border-radius: 0.75rem;
+  box-shadow: 0 16px 40px rgba(31, 42, 68, 0.1);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.task-filters__header h2 {
+  margin: 0;
+  font-size: 1.3rem;
+  color: #0f172a;
+}
+
+.task-filters__header p {
+  margin: 0.25rem 0 0 0;
+  color: #475569;
+}
+
+.filters-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.filters-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 200px;
+  color: #475569;
+  font-size: 0.95rem;
+}
+
+.filters-form__field--grow {
+  flex: 1 1 320px;
+}
+
+.filters-form__field input,
+.filters-form__field select {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.6rem;
+  padding: 0.65rem 0.85rem;
+  font-size: 1rem;
+  background: #f8fafc;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.filters-form__field input:focus,
+.filters-form__field select:focus {
+  border-color: #2563eb;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  outline: none;
+}
+
+.filters-form__reset {
+  border: none;
+  border-radius: 0.6rem;
+  background: #e2e8f0;
+  color: #1f2933;
+  font-size: 0.95rem;
+  font-weight: 600;
+  padding: 0.65rem 1.4rem;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.filters-form__reset:hover,
+.filters-form__reset:focus-visible {
+  background: #cbd5e1;
+  transform: translateY(-1px);
+}
+
+.filters-form__reset:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.2);
+}
+
+.filters-form__status {
+  font-size: 0.9rem;
+  color: #475569;
+}
+
 .summary .label {
   font-size: 0.8rem;
   text-transform: uppercase;
@@ -146,31 +233,21 @@ tr:hover {
   text-decoration: underline;
 }
 
+
 .entries-link {
-  background: none;
-  border: none;
-  padding: 0;
-  margin: 0;
   color: #2563eb;
-  cursor: pointer;
-  font: inherit;
-  text-decoration: underline;
+  text-decoration: none;
+  font-weight: 600;
 }
 
 .entries-link:hover,
 .entries-link:focus {
-  text-decoration: none;
+  text-decoration: underline;
 }
 
 .entries-link:focus-visible {
   outline: 2px solid rgba(37, 99, 235, 0.35);
   outline-offset: 2px;
-}
-
-.entries-link[disabled] {
-  color: #94a3b8;
-  cursor: default;
-  text-decoration: none;
 }
 
 td.metric {
@@ -443,106 +520,25 @@ footer {
 }
 
 @media (max-width: 900px) {
-  .search-form {
+  .search-form,
+  .filters-form {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .filters-form__reset,
+  .search-form button {
+    align-self: flex-start;
   }
 
   .field--checkbox {
     padding-top: 0;
   }
 
-  .search-form button {
-    align-self: flex-start;
-  }
-
   .search-result .result-header {
     flex-direction: column;
     align-items: flex-start;
   }
-}
-
-body.modal-open {
-  overflow: hidden;
-}
-
-.modal {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal.hidden {
-  display: none;
-}
-
-.modal__backdrop {
-  position: absolute;
-  inset: 0;
-  background: rgba(15, 23, 42, 0.55);
-}
-
-.modal__content {
-  position: relative;
-  width: min(720px, 92vw);
-  max-height: 90vh;
-  background: #fff;
-  border-radius: 0.9rem;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.25);
-  padding: 1.75rem 2rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  overflow: hidden;
-}
-
-.modal__title {
-  margin: 0;
-  font-size: 1.35rem;
-  color: #0f172a;
-}
-
-.modal__meta {
-  font-size: 0.9rem;
-  color: #64748b;
-}
-
-.modal__body {
-  flex: 1;
-  overflow-y: auto;
-  padding-right: 0.5rem;
-}
-
-.modal__close {
-  position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  color: #475569;
-  cursor: pointer;
-  line-height: 1;
-}
-
-.modal__close:hover,
-.modal__close:focus {
-  color: #1f2937;
-}
-
-.modal__empty {
-  margin: 1.5rem 0;
-  text-align: center;
-  color: #64748b;
-}
-
-.modal__error {
-  margin: 1.5rem 0;
-  text-align: center;
-  color: #b91c1c;
 }
 
 .entries-list {
@@ -635,4 +631,119 @@ body.modal-open {
   font-size: 0.9rem;
   color: #64748b;
   font-style: italic;
+}
+
+body.entries-page {
+  background: #f4f6fb;
+  color: #1f2933;
+  margin: 0;
+  font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+}
+
+.entries-header {
+  background: #1f2a44;
+  color: #fff;
+  padding: 1.75rem 1.5rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.entries-header__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.entries-header__back {
+  color: #bfdbfe;
+  text-decoration: none;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.entries-header__back:hover,
+.entries-header__back:focus {
+  text-decoration: underline;
+}
+
+.entries-header__meta {
+  font-size: 0.9rem;
+  opacity: 0.85;
+}
+
+.entries-header__title {
+  margin: 0;
+  font-size: 1.7rem;
+}
+
+.entries-header__subtitle {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.entries-main {
+  padding: 2rem 1.5rem 2.5rem;
+  display: flex;
+  justify-content: center;
+}
+
+.entries-card {
+  width: min(960px, 100%);
+  background: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.entries-card__meta {
+  font-size: 0.95rem;
+  color: #475569;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.entries-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.entries-footer {
+  padding: 1.5rem;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.entries-footer__link {
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.entries-footer__link:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .entries-main {
+    padding: 1.5rem 1rem 2rem;
+  }
+
+  .entries-card {
+    padding: 1.5rem;
+  }
+
+  .entries-header__title {
+    font-size: 1.45rem;
+  }
 }
