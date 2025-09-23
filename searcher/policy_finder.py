@@ -98,6 +98,62 @@ def pick_best_path(documents: List[Dict[str, Any]]) -> Optional[str]:
             return p
     return None
 
+
+def discover_project_root(start: Optional[Path] = None) -> Path:
+    """Return the repository root starting from ``start`` (or this file).
+
+    The search mimics the CLI fallback logic: walk up the directory tree and
+    look for ``pbc_config.json`` or the ``icrawler`` package.
+    """
+
+    base = Path(start) if start else Path(__file__).resolve().parent
+    for candidate in [base, *base.parents]:
+        if (candidate / "pbc_config.json").exists() or (candidate / "icrawler").is_dir():
+            return candidate
+    return base
+
+
+def resolve_artifact_dir(project_root: Path) -> Path:
+    """Resolve the artifact directory respecting ``pbc_config.json``."""
+
+    config_path = project_root / "pbc_config.json"
+    if config_path.exists():
+        try:
+            config_data = json.loads(config_path.read_text("utf-8"))
+        except Exception:
+            config_data = {}
+        artifact_setting = config_data.get("artifact_dir")
+        if isinstance(artifact_setting, str) and artifact_setting.strip():
+            candidate = Path(artifact_setting.strip()).expanduser()
+            if not candidate.is_absolute():
+                candidate = (project_root / candidate).resolve()
+            return candidate
+    return (project_root / "artifacts").resolve()
+
+
+def default_state_path(task_name: str, start: Optional[Path] = None) -> Path:
+    """Return the default state path for a task, mirroring CLI behaviour."""
+
+    project_root = discover_project_root(start)
+    artifact_dir = resolve_artifact_dir(project_root)
+    slug = project_safe_filename(task_name) or "task"
+    filename = f"{slug}_state.json"
+    candidates = [
+        artifact_dir / "downloads" / filename,
+        project_root / "artifacts" / "downloads" / filename,
+        (Path(start) if start else Path(__file__).resolve().parent) / filename,
+        Path("/mnt/data") / filename,
+    ]
+    seen: List[Path] = []
+    for cand in candidates:
+        resolved = cand.resolve()
+        if resolved not in seen:
+            seen.append(resolved)
+    for cand in seen:
+        if cand.exists():
+            return cand
+    return seen[0]
+
 @dataclass
 class Entry:
     id: int
@@ -121,6 +177,22 @@ class Entry:
         self.agency  = guess_agency(self.title)
         self.best_path = pick_best_path(self.documents)
         self.tokens = tokenize_zh(self.norm_title)
+
+    def to_dict(self, include_documents: bool = True) -> Dict[str, Any]:
+        data: Dict[str, Any] = {
+            "id": self.id,
+            "title": self.title,
+            "remark": self.remark,
+            "norm_title": self.norm_title,
+            "doc_no": self.doc_no,
+            "year": self.year,
+            "doctype": self.doctype,
+            "agency": self.agency,
+            "best_path": self.best_path,
+        }
+        if include_documents:
+            data["documents"] = self.documents
+        return data
 
 def load_entries(json_path: str) -> List[Entry]:
     with open(json_path, 'r', encoding='utf-8') as f:
@@ -226,52 +298,11 @@ def main(argv: List[str]):
     query = argv[1]
     script_dir = Path(__file__).resolve().parent
 
-    def _discover_project_root(base: Path) -> Path:
-        for candidate in [base, *base.parents]:
-            if (candidate / "pbc_config.json").exists() or (candidate / "icrawler").is_dir():
-                return candidate
-        return base
+    default_a = default_state_path("policy_updates", script_dir)
+    default_b = default_state_path("regulator_notice", script_dir)
 
-    def _resolve_artifact_dir(project_root: Path) -> Path:
-        config_path = project_root / "pbc_config.json"
-        if config_path.exists():
-            try:
-                config_data = json.loads(config_path.read_text("utf-8"))
-            except Exception:
-                config_data = {}
-            artifact_setting = config_data.get("artifact_dir")
-            if isinstance(artifact_setting, str) and artifact_setting.strip():
-                candidate = Path(artifact_setting.strip()).expanduser()
-                if not candidate.is_absolute():
-                    candidate = (project_root / candidate).resolve()
-                return candidate
-        return (project_root / "artifacts").resolve()
-
-    def _default_state_path(task_name: str) -> Path:
-        project_root = _discover_project_root(script_dir)
-        artifact_dir = _resolve_artifact_dir(project_root)
-        slug = project_safe_filename(task_name) or "task"
-        filename = f"{slug}_state.json"
-        candidates = [
-            artifact_dir / "downloads" / filename,
-            project_root / "artifacts" / "downloads" / filename,
-            script_dir / filename,
-            Path("/mnt/data") / filename,
-        ]
-        seen: List[Path] = []
-        for cand in candidates:
-            if cand not in seen:
-                seen.append(cand)
-        for cand in seen:
-            if cand.exists():
-                return cand
-        return seen[0]
-
-    default_a = _default_state_path("policy_updates")
-    default_b = _default_state_path("regulator_notice")
-
-    a = Path(argv[2]) if len(argv) >= 3 else default_a
-    b = Path(argv[3]) if len(argv) >= 4 else default_b
+    a = Path(argv[2]).expanduser() if len(argv) >= 3 else default_a
+    b = Path(argv[3]).expanduser() if len(argv) >= 4 else default_b
 
     if not a.exists() and (Path('/mnt/data')/a.name).exists():
         a = Path('/mnt/data')/a.name
