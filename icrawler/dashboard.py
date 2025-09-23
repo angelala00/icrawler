@@ -475,13 +475,20 @@ def _serve_dashboard(
     if policy_finder is None and isinstance(search_reason, str):
         search_config_payload["reason"] = search_reason
 
+    search_finder_for_handler = policy_finder
+    search_default_topk_for_handler = search_default_topk
+    search_max_topk_for_handler = search_max_topk
+    search_include_documents_for_handler = search_include_documents
+    search_reason_for_handler = search_reason
+    search_config_payload_for_handler = search_config_payload
+
     class DashboardHandler(BaseHTTPRequestHandler):
-        search_finder = policy_finder
-        search_default_topk = search_default_topk
-        search_max_topk = search_max_topk
-        search_include_documents = search_include_documents
-        search_reason = search_reason
-        search_config_payload = search_config_payload
+        search_finder = search_finder_for_handler
+        search_default_topk = search_default_topk_for_handler
+        search_max_topk = search_max_topk_for_handler
+        search_include_documents = search_include_documents_for_handler
+        search_reason = search_reason_for_handler
+        search_config_payload = search_config_payload_for_handler
 
         def _write(
             self,
