@@ -1,21 +1,17 @@
 import json
 import sys
-import threading
-import time
 from pathlib import Path
-from urllib.error import HTTPError
-from urllib.parse import quote
-from urllib.request import Request, urlopen
 
 import pytest
+from fastapi.testclient import TestClient
 
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from searcher.api_server import build_server
-from searcher.policy_finder import PolicyFinder
+from searcher.api_server import create_app  # noqa: E402
+from searcher.policy_finder import PolicyFinder  # noqa: E402
 
 
 @pytest.fixture
@@ -53,29 +49,21 @@ def sample_state_files(tmp_path):
 
 
 @pytest.fixture
-def running_server(sample_state_files):
+def api_client(sample_state_files):
     policy_path, notice_path = sample_state_files
     finder = PolicyFinder(str(policy_path), str(notice_path))
-    server = build_server(finder, "127.0.0.1", 0)
-    host, port = server.server_address[:2]
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    base_url = f"http://{host}:{port}"
-
-    # Wait briefly to ensure the server thread is listening.
-    time.sleep(0.05)
-
-    yield base_url
-
-    server.shutdown()
-    thread.join(timeout=1)
-    server.server_close()
+    app = create_app(finder)
+    with TestClient(app) as client:
+        yield client
 
 
-def test_get_search_endpoint(running_server):
-    encoded_query = quote("人民银行公告")
-    response = urlopen(f"{running_server}/search?query={encoded_query}&topk=2")
-    payload = json.loads(response.read().decode("utf-8"))
+def test_get_search_endpoint(api_client):
+    response = api_client.get(
+        "/search",
+        params={"query": "人民银行公告", "topk": "2"},
+    )
+    assert response.status_code == 200
+    payload = response.json()
     assert payload["query"] == "人民银行公告"
     assert payload["result_count"] >= 1
     result = payload["results"][0]
@@ -84,27 +72,25 @@ def test_get_search_endpoint(running_server):
     assert result["score"] > 0
 
 
-def test_post_search_without_documents(running_server):
-    request = Request(
-        f"{running_server}/search",
-        data=json.dumps({
+def test_post_search_without_documents(api_client):
+    response = api_client.post(
+        "/search",
+        json={
             "query": "监管",
             "topk": 2,
             "include_documents": False,
-        }).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        },
     )
-    response = urlopen(request)
-    payload = json.loads(response.read().decode("utf-8"))
+    assert response.status_code == 200
+    payload = response.json()
     assert payload["result_count"] == 2
     for result in payload["results"]:
         assert "documents" not in result
 
 
-def test_missing_query_returns_error(running_server):
-    with pytest.raises(HTTPError) as excinfo:
-        urlopen(f"{running_server}/search")
-    body = excinfo.value.read().decode("utf-8")
-    payload = json.loads(body)
+def test_missing_query_returns_error(api_client):
+    response = api_client.get("/search")
+    assert response.status_code == 400
+    payload = response.json()
     assert payload["error"]
     assert "query" in payload["error"]

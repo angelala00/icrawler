@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Simple HTTP API for :mod:`searcher.policy_finder`.
+"""FastAPI server exposing :mod:`searcher.policy_finder`.
 
-The server exposes a ``/search`` endpoint that mirrors the command line tool
-but returns JSON responses suitable for automation. Example usage::
+The API mirrors the previous simple HTTP server but is now powered by
+`FastAPI <https://fastapi.tiangolo.com/>`_.  Example usage from the command
+line::
 
     python -m searcher.api_server --host 0.0.0.0 --port 8080
 
@@ -23,10 +24,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
-from urllib.parse import parse_qs, urlparse
+
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
 
 from .policy_finder import (
     Entry,
@@ -90,147 +94,134 @@ def _resolve_json_path(value: Optional[str], fallback: Path) -> Path:
     return candidate
 
 
-def _make_handler(finder: PolicyFinder):
-    class PolicyFinderHandler(BaseHTTPRequestHandler):
-        server_version = "PolicyFinderAPI/1.0"
-        finder_instance = finder
+def _search_payload(
+    finder: PolicyFinder,
+    query: str,
+    topk: int,
+    include_documents: bool,
+) -> Dict[str, Any]:
+    results = [
+        _entry_payload(entry, score, include_documents)
+        for entry, score in finder.search(query, topk=topk)
+    ]
+    return {
+        "query": query,
+        "topk": topk,
+        "result_count": len(results),
+        "results": results,
+    }
 
-        def _send_json(self, status: int, payload: Dict[str, Any]) -> None:
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(body)
 
-        def _handle_search(self, query: str, topk: int, include_documents: bool) -> None:
-            results = [
-                _entry_payload(entry, score, include_documents)
-                for entry, score in self.finder_instance.search(query, topk=topk)
-            ]
-            self._send_json(
-                200,
-                {
-                    "query": query,
-                    "topk": topk,
-                    "result_count": len(results),
-                    "results": results,
-                },
-            )
+def create_app(finder: PolicyFinder) -> FastAPI:
+    """Create and configure a FastAPI application for the policy finder."""
 
-        def _bad_request(self, message: str) -> None:
-            LOGGER.debug("Bad request: %s", message)
-            self._send_json(400, {"error": message})
+    app = FastAPI(title="Policy Finder API", version="1.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-        def do_OPTIONS(self) -> None:  # noqa: N802 (HTTP verb method name)
-            parsed = urlparse(self.path)
-            if parsed.path == "/search":
-                self.send_response(204)
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", "Content-Type")
-                self.end_headers()
-                return
-            self.send_response(404)
-            self.end_headers()
+    app.state.finder = finder
 
-        def do_GET(self) -> None:  # noqa: N802
-            parsed = urlparse(self.path)
-            if parsed.path in {"/health", "/healthz", "/ping"}:
-                self._send_json(200, {"status": "ok"})
-                return
-            if parsed.path in {"", "/"}:
-                self._send_json(200, {"service": "policy_finder", "endpoints": ["/search"]})
-                return
-            if parsed.path != "/search":
-                self._send_json(404, {"error": "not_found"})
-                return
+    def get_finder(request: Request) -> PolicyFinder:
+        finder_instance = getattr(request.app.state, "finder", None)
+        if finder_instance is None:
+            raise HTTPException(status_code=503, detail="Policy finder not configured")
+        return finder_instance
 
-            params = parse_qs(parsed.query)
-            query_values = params.get("query") or params.get("q")
-            if not query_values or not query_values[0].strip():
-                self._bad_request("Missing 'query' parameter")
-                return
-            query = query_values[0].strip()
+    def bad_request(message: str) -> JSONResponse:
+        LOGGER.debug("Bad request: %s", message)
+        return JSONResponse(status_code=400, content={"error": message})
 
-            topk_param = params.get("topk", [None])[0]
+    @app.get("/")
+    def root() -> Dict[str, Any]:
+        return {"service": "policy_finder", "endpoints": ["/search"]}
+
+    @app.get("/health")
+    @app.get("/healthz")
+    @app.get("/ping")
+    def health() -> Dict[str, str]:
+        return {"status": "ok"}
+
+    @app.options("/search")
+    def options_search() -> Response:
+        return Response(status_code=204)
+
+    @app.get("/search")
+    def search_get(
+        query: Optional[str] = Query(None),
+        q: Optional[str] = Query(None),
+        topk: Optional[str] = Query(None),
+        include_documents: Optional[str] = Query(None),
+        documents: Optional[str] = Query(None),
+        finder_instance: PolicyFinder = Depends(get_finder),
+    ) -> JSONResponse:
+        query_text = query or q or ""
+        query_text = query_text.strip()
+        if not query_text:
+            return bad_request("Missing 'query' parameter")
+
+        try:
+            topk_value = _coerce_topk(topk)
+        except Exception:
+            return bad_request("Invalid 'topk' parameter")
+
+        include_flag = True
+        include_param = include_documents if include_documents is not None else documents
+        if include_param is not None:
             try:
-                topk = _coerce_topk(topk_param)
+                parsed_bool = _coerce_bool(include_param)
             except Exception:
-                self._bad_request("Invalid 'topk' parameter")
-                return
+                return bad_request("Invalid 'include_documents' parameter")
+            if parsed_bool is not None:
+                include_flag = parsed_bool
 
-            include_documents = True
-            include_param = params.get("include_documents") or params.get("documents")
-            if include_param and include_param[0] is not None:
-                try:
-                    parsed_bool = _coerce_bool(include_param[0])
-                except Exception:
-                    self._bad_request("Invalid 'include_documents' parameter")
-                    return
-                if parsed_bool is not None:
-                    include_documents = parsed_bool
+        payload = _search_payload(finder_instance, query_text, topk_value, include_flag)
+        return JSONResponse(status_code=200, content=payload)
 
-            self._handle_search(query, topk, include_documents)
+    @app.post("/search")
+    async def search_post(
+        request: Request,
+        finder_instance: PolicyFinder = Depends(get_finder),
+    ) -> JSONResponse:
+        body = await request.body()
+        if not body:
+            return bad_request("Empty request body")
 
-        def do_POST(self) -> None:  # noqa: N802
-            parsed = urlparse(self.path)
-            if parsed.path != "/search":
-                self._send_json(404, {"error": "not_found"})
-                return
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return bad_request("Request body must be valid JSON")
 
-            content_length = self.headers.get("Content-Length")
+        if not isinstance(payload, dict):
+            return bad_request("Request body must be a JSON object")
+
+        query_value = payload.get("query") or payload.get("q")
+        if not isinstance(query_value, str) or not query_value.strip():
+            return bad_request("Field 'query' is required")
+        query_text = query_value.strip()
+
+        try:
+            topk_value = _coerce_topk(payload.get("topk"))
+        except Exception:
+            return bad_request("Field 'topk' must be a positive integer")
+
+        include_flag = True
+        include_key = "include_documents" if "include_documents" in payload else "documents"
+        if include_key in payload:
             try:
-                length = int(content_length) if content_length else 0
-            except ValueError:
-                self._bad_request("Invalid Content-Length header")
-                return
-
-            data = self.rfile.read(length) if length > 0 else b""
-            if not data:
-                self._bad_request("Empty request body")
-                return
-
-            try:
-                payload = json.loads(data.decode("utf-8"))
-            except json.JSONDecodeError:
-                self._bad_request("Request body must be valid JSON")
-                return
-
-            query = payload.get("query") or payload.get("q")
-            if not isinstance(query, str) or not query.strip():
-                self._bad_request("Field 'query' is required")
-                return
-            query = query.strip()
-
-            try:
-                topk = _coerce_topk(payload.get("topk"))
+                parsed_bool = _coerce_bool(payload.get(include_key))
             except Exception:
-                self._bad_request("Field 'topk' must be a positive integer")
-                return
+                return bad_request("Field 'include_documents' must be boolean")
+            if parsed_bool is not None:
+                include_flag = parsed_bool
 
-            include_documents = True
-            if "include_documents" in payload:
-                try:
-                    parsed_bool = _coerce_bool(payload.get("include_documents"))
-                except Exception:
-                    self._bad_request("Field 'include_documents' must be boolean")
-                    return
-                if parsed_bool is not None:
-                    include_documents = parsed_bool
+        payload_data = _search_payload(finder_instance, query_text, topk_value, include_flag)
+        return JSONResponse(status_code=200, content=payload_data)
 
-            self._handle_search(query, topk, include_documents)
-
-        def log_message(self, fmt: str, *args: Any) -> None:
-            LOGGER.info("%s - %s", self.address_string(), fmt % args)
-
-    return PolicyFinderHandler
-
-
-def build_server(finder: PolicyFinder, host: str, port: int) -> ThreadingHTTPServer:
-    handler = _make_handler(finder)
-    return ThreadingHTTPServer((host, port), handler)
+    return app
 
 
 def parse_args(argv: Optional[Tuple[str, ...]] = None) -> argparse.Namespace:
@@ -263,16 +254,15 @@ def main(argv: Optional[Tuple[str, ...]] = None) -> int:
 
     finder = PolicyFinder(str(policy_updates_path), str(regulator_notice_path))
 
-    server = build_server(finder, args.host, args.port)
-    host, port = server.server_address[:2]
+    app = create_app(finder)
+    host = args.host
+    port = args.port
     LOGGER.info("Serving policy finder API on %s:%s", host, port)
 
     try:
-        server.serve_forever()
+        uvicorn.run(app, host=host, port=port, log_level="info")
     except KeyboardInterrupt:
         LOGGER.info("Stopping policy finder API")
-    finally:
-        server.server_close()
     return 0
 
 
