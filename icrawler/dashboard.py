@@ -3,18 +3,14 @@ from __future__ import annotations
 import argparse
 import functools
 import json
-import mimetypes
 import os
 import socket
 import sys
 import threading
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
-from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-from urllib.parse import parse_qs, urlsplit
 
 from . import pbc_monitor as core
 from .fetching import build_cache_path_for_url
@@ -26,6 +22,25 @@ from .runner import (
 )
 from .state import PBCState
 from searcher.policy_finder import Entry, PolicyFinder, default_state_path
+
+try:  # pragma: no cover - optional dependency during import
+    from fastapi import FastAPI, HTTPException, Request
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+    import uvicorn
+except ImportError as exc:  # pragma: no cover - optional dependency during import
+    FastAPI = None  # type: ignore[assignment]
+    HTTPException = None  # type: ignore[assignment]
+    Request = None  # type: ignore[assignment]
+    CORSMiddleware = None  # type: ignore[assignment]
+    FileResponse = None  # type: ignore[assignment]
+    HTMLResponse = None  # type: ignore[assignment]
+    JSONResponse = None  # type: ignore[assignment]
+    PlainTextResponse = None  # type: ignore[assignment]
+    uvicorn = None  # type: ignore[assignment]
+    _FASTAPI_IMPORT_ERROR = exc
+else:
+    _FASTAPI_IMPORT_ERROR = None
 
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -451,6 +466,22 @@ def _serve_dashboard(
     policy_finder: Optional[PolicyFinder],
     search_settings: Dict[str, object],
 ) -> None:
+    if (
+        FastAPI is None
+        or uvicorn is None
+        or JSONResponse is None
+        or HTMLResponse is None
+        or PlainTextResponse is None
+        or FileResponse is None
+        or CORSMiddleware is None
+        or HTTPException is None
+        or Request is None
+    ):
+        raise RuntimeError(
+            "FastAPI and uvicorn are required to run the dashboard. "
+            "Install them via `pip install fastapi uvicorn`."
+        ) from _FASTAPI_IMPORT_ERROR
+
     overviews_lock = threading.Lock()
 
     search_default_topk = int(search_settings.get("default_topk", DEFAULT_SEARCH_TOPK))
@@ -475,288 +506,184 @@ def _serve_dashboard(
     if policy_finder is None and isinstance(search_reason, str):
         search_config_payload["reason"] = search_reason
 
-    search_finder_for_handler = policy_finder
-    search_default_topk_for_handler = search_default_topk
-    search_max_topk_for_handler = search_max_topk
-    search_include_documents_for_handler = search_include_documents
-    search_reason_for_handler = search_reason
-    search_config_payload_for_handler = search_config_payload
+    search_finder = policy_finder
 
-    class DashboardHandler(BaseHTTPRequestHandler):
-        search_finder = search_finder_for_handler
-        search_default_topk = search_default_topk_for_handler
-        search_max_topk = search_max_topk_for_handler
-        search_include_documents = search_include_documents_for_handler
-        search_reason = search_reason_for_handler
-        search_config_payload = search_config_payload_for_handler
+    app = FastAPI()
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
-        def _write(
-            self,
-            content: bytes,
-            content_type: str = "text/html; charset=utf-8",
-            *,
-            status: HTTPStatus = HTTPStatus.OK,
-            extra_headers: Optional[Dict[str, str]] = None,
-        ) -> None:
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(content)))
-            if extra_headers:
-                for key, value in extra_headers.items():
-                    self.send_header(key, value)
-            self.end_headers()
-            self.wfile.write(content)
+    def _search_disabled_response() -> JSONResponse:
+        payload: Dict[str, object] = {"error": "search_disabled"}
+        if isinstance(search_reason, str):
+            payload["reason"] = search_reason
+        return JSONResponse(payload, status_code=404)
 
-        def _json_response(
-            self, payload: object, *, status: HTTPStatus = HTTPStatus.OK
-        ) -> None:
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-            headers = {"Access-Control-Allow-Origin": "*"}
-            self._write(
-                body,
-                "application/json; charset=utf-8",
-                status=status,
-                extra_headers=headers,
-            )
-
-        def _serve_static(self, path: str) -> None:
-            relative = path.lstrip("/")
-            if not relative:
-                relative = "index.html"
-            base_dir = WEB_DIR.resolve()
-            try:
-                target = (base_dir / relative).resolve()
-                target.relative_to(base_dir)
-            except ValueError:
-                self.send_error(HTTPStatus.NOT_FOUND, "File not found")
-                return
-            if not target.is_file():
-                self.send_error(HTTPStatus.NOT_FOUND, "File not found")
-                return
-            content_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-            data = target.read_bytes()
-            if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
-                content_type = f"{content_type}; charset=utf-8"
-            self._write(data, content_type)
-
-        def _search_disabled_response(self) -> None:
-            payload: Dict[str, object] = {"error": "search_disabled"}
-            if isinstance(self.search_reason, str):
-                payload["reason"] = self.search_reason
-            self._json_response(payload, status=HTTPStatus.NOT_FOUND)
-
-        def _handle_search(self, query: str, topk: int, include_documents: bool) -> None:
-            if self.search_finder is None:
-                self._search_disabled_response()
-                return
-            results = [
-                _search_entry_payload(entry, score, include_documents)
-                for entry, score in self.search_finder.search(query, topk=topk)
-            ]
-            self._json_response(
-                {
-                    "query": query,
-                    "topk": topk,
-                    "include_documents": include_documents,
-                    "result_count": len(results),
-                    "results": results,
-                }
-            )
-
-        def do_OPTIONS(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler interface
-            parsed = urlsplit(self.path)
-            if parsed.path == "/api/search":
-                self.send_response(HTTPStatus.NO_CONTENT)
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", "Content-Type")
-                self.end_headers()
-                return
-            self.send_response(HTTPStatus.NOT_FOUND)
-            self.end_headers()
-
-        def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler interface
-            parsed = urlsplit(self.path)
-            path = parsed.path or "/"
-            if path == "/api/tasks":
-                try:
-                    with overviews_lock:
-                        overviews = collect_task_overviews(
-                            config_path,
-                            task=task,
-                            artifact_dir_override=artifact_dir_override,
-                        )
-                    payload = [overview.to_jsonable() for overview in overviews]
-                    self._json_response(payload)
-                except Exception as exc:  # pragma: no cover - logged to client
-                    self._json_response(
-                        {"error": str(exc)},
-                        status=HTTPStatus.INTERNAL_SERVER_ERROR,
-                    )
-                return
-
-            if path == "/healthz":
-                self._write(b"ok", "text/plain; charset=utf-8")
-                return
-
-            if path == "/api/search":
-                if self.search_finder is None:
-                    self._search_disabled_response()
-                    return
-                params = parse_qs(parsed.query or "")
-                query_values = params.get("query") or params.get("q")
-                if not query_values or not query_values[0].strip():
-                    self._json_response(
-                        {"error": "missing_query"},
-                        status=HTTPStatus.BAD_REQUEST,
-                    )
-                    return
-                query = query_values[0].strip()
-                topk_param = params.get("topk", [None])[0]
-                try:
-                    topk = _coerce_search_topk(
-                        topk_param,
-                        default=self.search_default_topk,
-                        limit=self.search_max_topk,
-                    )
-                except Exception:
-                    self._json_response(
-                        {"error": "invalid_topk"},
-                        status=HTTPStatus.BAD_REQUEST,
-                    )
-                    return
-
-                include_documents = self.search_include_documents
-                include_param = params.get("include_documents") or params.get("documents")
-                if include_param and include_param[0] is not None:
-                    try:
-                        parsed_bool = _coerce_search_bool(include_param[0])
-                    except Exception:
-                        self._json_response(
-                            {"error": "invalid_include_documents"},
-                            status=HTTPStatus.BAD_REQUEST,
-                        )
-                        return
-                    if parsed_bool is not None:
-                        include_documents = parsed_bool
-
-                self._handle_search(query, topk, include_documents)
-                return
-
-            if path in ("/", "/index.html"):
-                try:
-                    html = _render_index_html(
-                        auto_refresh=auto_refresh,
-                        generated_at=datetime.now(),
-                        api_base="",
-                        search_config=self.search_config_payload,
-                    ).encode("utf-8")
-                except FileNotFoundError as exc:  # pragma: no cover - configuration issue
-                    message = f"Dashboard error: {exc}".encode("utf-8")
-                    self.send_response(HTTPStatus.INTERNAL_SERVER_ERROR)
-                    self.send_header("Content-Type", "text/plain; charset=utf-8")
-                    self.send_header("Content-Length", str(len(message)))
-                    self.end_headers()
-                    self.wfile.write(message)
-                    return
-                self._write(html)
-                return
-
-            self._serve_static(path)
-
-        def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler interface
-            parsed = urlsplit(self.path)
-            if parsed.path != "/api/search":
-                self._json_response({"error": "not_found"}, status=HTTPStatus.NOT_FOUND)
-                return
-
-            if self.search_finder is None:
-                self._search_disabled_response()
-                return
-
-            content_length = self.headers.get("Content-Length")
-            try:
-                length = int(content_length) if content_length else 0
-            except ValueError:
-                self._json_response(
-                    {"error": "invalid_content_length"},
-                    status=HTTPStatus.BAD_REQUEST,
-                )
-                return
-
-            data = self.rfile.read(length) if length > 0 else b""
-            if not data:
-                self._json_response(
-                    {"error": "empty_body"},
-                    status=HTTPStatus.BAD_REQUEST,
-                )
-                return
-
-            try:
-                payload = json.loads(data.decode("utf-8"))
-            except json.JSONDecodeError:
-                self._json_response(
-                    {"error": "invalid_json"},
-                    status=HTTPStatus.BAD_REQUEST,
-                )
-                return
-
-            query = payload.get("query") or payload.get("q")
-            if not isinstance(query, str) or not query.strip():
-                self._json_response(
-                    {"error": "missing_query"},
-                    status=HTTPStatus.BAD_REQUEST,
-                )
-                return
-            query = query.strip()
-
-            try:
-                topk = _coerce_search_topk(
-                    payload.get("topk"),
-                    default=self.search_default_topk,
-                    limit=self.search_max_topk,
-                )
-            except Exception:
-                self._json_response(
-                    {"error": "invalid_topk"},
-                    status=HTTPStatus.BAD_REQUEST,
-                )
-                return
-
-            include_documents = self.search_include_documents
-            if "include_documents" in payload:
-                try:
-                    parsed_bool = _coerce_search_bool(payload.get("include_documents"))
-                except Exception:
-                    self._json_response(
-                        {"error": "invalid_include_documents"},
-                        status=HTTPStatus.BAD_REQUEST,
-                    )
-                    return
-                if parsed_bool is not None:
-                    include_documents = parsed_bool
-
-            self._handle_search(query, topk, include_documents)
-
-        def log_message(self, format: str, *args: object) -> None:  # noqa: A003 - BaseHTTPRequestHandler signature
-            sys.stderr.write(
-                "%s - - [%s] %s\n"
-                % (self.address_string(), self.log_date_time_string(), format % args)
-            )
-
-    with HTTPServer((host, port), DashboardHandler) as httpd:
-        address = httpd.server_address
-        host_display = address[0]
-        if host_display == "0.0.0.0":
-            host_display = socket.gethostbyname(socket.gethostname())
-        print(
-            f"Serving dashboard on http://{host_display}:{address[1]} (Ctrl+C to quit)",
-            file=sys.stderr,
+    def _handle_search(query: str, topk: int, include_documents: bool) -> JSONResponse:
+        if search_finder is None:
+            return _search_disabled_response()
+        results = [
+            _search_entry_payload(entry, score, include_documents)
+            for entry, score in search_finder.search(query, topk=topk)
+        ]
+        return JSONResponse(
+            {
+                "query": query,
+                "topk": topk,
+                "include_documents": include_documents,
+                "result_count": len(results),
+                "results": results,
+            }
         )
+
+    @app.get("/api/tasks")
+    def get_tasks() -> JSONResponse:
         try:
-            httpd.serve_forever()
-        except KeyboardInterrupt:  # pragma: no cover - manual stop
-            print("Stopping dashboard", file=sys.stderr)
+            with overviews_lock:
+                overviews = collect_task_overviews(
+                    config_path,
+                    task=task,
+                    artifact_dir_override=artifact_dir_override,
+                )
+            payload = [overview.to_jsonable() for overview in overviews]
+            return JSONResponse(payload)
+        except Exception as exc:  # pragma: no cover - logged to client
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @app.get("/healthz")
+    def healthcheck() -> PlainTextResponse:
+        return PlainTextResponse("ok")
+
+    @app.get("/api/search")
+    def search_get(request: Request) -> JSONResponse:
+        if search_finder is None:
+            return _search_disabled_response()
+
+        params = request.query_params
+        query_value = params.get("query") or params.get("q")
+        if not query_value or not query_value.strip():
+            return JSONResponse({"error": "missing_query"}, status_code=400)
+        query = query_value.strip()
+
+        topk_param = params.get("topk")
+        try:
+            topk = _coerce_search_topk(
+                topk_param,
+                default=search_default_topk,
+                limit=search_max_topk,
+            )
+        except Exception:
+            return JSONResponse({"error": "invalid_topk"}, status_code=400)
+
+        include_documents = search_include_documents
+        include_param = params.get("include_documents") or params.get("documents")
+        if include_param is not None:
+            try:
+                parsed_bool = _coerce_search_bool(include_param)
+            except Exception:
+                return JSONResponse({"error": "invalid_include_documents"}, status_code=400)
+            if parsed_bool is not None:
+                include_documents = parsed_bool
+
+        return _handle_search(query, topk, include_documents)
+
+    @app.post("/api/search")
+    async def search_post(request: Request) -> JSONResponse:
+        if search_finder is None:
+            return _search_disabled_response()
+
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                int(content_length)
+            except ValueError:
+                return JSONResponse({"error": "invalid_content_length"}, status_code=400)
+
+        body = await request.body()
+        if not body:
+            return JSONResponse({"error": "empty_body"}, status_code=400)
+
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return JSONResponse({"error": "invalid_json"}, status_code=400)
+
+        query_value = payload.get("query") or payload.get("q")
+        if not isinstance(query_value, str) or not query_value.strip():
+            return JSONResponse({"error": "missing_query"}, status_code=400)
+        query = query_value.strip()
+
+        try:
+            topk = _coerce_search_topk(
+                payload.get("topk"),
+                default=search_default_topk,
+                limit=search_max_topk,
+            )
+        except Exception:
+            return JSONResponse({"error": "invalid_topk"}, status_code=400)
+
+        include_documents = search_include_documents
+        if "include_documents" in payload:
+            try:
+                parsed_bool = _coerce_search_bool(payload.get("include_documents"))
+            except Exception:
+                return JSONResponse({"error": "invalid_include_documents"}, status_code=400)
+            if parsed_bool is not None:
+                include_documents = parsed_bool
+
+        return _handle_search(query, topk, include_documents)
+
+    def _render_index_response() -> HTMLResponse:
+        try:
+            html = _render_index_html(
+                auto_refresh=auto_refresh,
+                generated_at=datetime.now(),
+                api_base="",
+                search_config=search_config_payload,
+            )
+        except FileNotFoundError as exc:  # pragma: no cover - configuration issue
+            message = f"Dashboard error: {exc}"
+            return HTMLResponse(message, status_code=500)
+        return HTMLResponse(html)
+
+    @app.get("/")
+    def index() -> HTMLResponse:
+        return _render_index_response()
+
+    @app.get("/index.html")
+    def index_html() -> HTMLResponse:
+        return _render_index_response()
+
+    @app.get("/{resource_path:path}", include_in_schema=False)
+    def serve_static(resource_path: str) -> FileResponse:
+        relative = resource_path.lstrip("/")
+        if not relative:
+            relative = "index.html"
+        base_dir = WEB_DIR.resolve()
+        try:
+            target = (base_dir / relative).resolve()
+            target.relative_to(base_dir)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="File not found")
+        if not target.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        return FileResponse(target)
+
+    host_display = host
+    if host_display == "0.0.0.0":
+        try:
+            host_display = socket.gethostbyname(socket.gethostname())
+        except OSError:  # pragma: no cover - best effort resolution
+            host_display = host
+    print(
+        f"Serving dashboard on http://{host_display}:{port} (Ctrl+C to quit)",
+        file=sys.stderr,
+    )
+
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 def main(argv: Optional[List[str]] = None) -> None:
