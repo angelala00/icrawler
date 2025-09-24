@@ -17,6 +17,21 @@ from searcher.policy_finder import PolicyFinder  # noqa: E402
 
 @pytest.fixture
 def sample_state_files(tmp_path):
+    policy_html = tmp_path / "policy.html"
+    policy_html.write_text(
+        """
+<html>
+  <body>
+    <h1>中国人民银行关于加强银行卡收单业务外包管理的通知</h1>
+    <p>第三条 第一款 收单机构应当按照下列要求开展外包管理：</p>
+    <p>（一）建立健全外包管理制度并明确责任。</p>
+    <p>（二）落实风险评估机制。</p>
+    <p>第二款 外包合作应当依法合规。</p>
+  </body>
+</html>
+        """.strip(),
+        "utf-8",
+    )
     policy_updates = {
         "entries": [
             {
@@ -24,8 +39,7 @@ def sample_state_files(tmp_path):
                 "title": "中国人民银行公告〔2023〕第3号 关于测试",
                 "remark": "测试备注",
                 "documents": [
-                    {"type": "pdf", "local_path": "/tmp/policy.pdf"},
-                    {"type": "html", "local_path": "/tmp/policy.html"},
+                    {"type": "html", "local_path": str(policy_html)},
                 ],
             }
         ]
@@ -96,6 +110,32 @@ def test_get_search_endpoint(policy_api):
     assert result["title"].startswith("中国人民银行公告")
     assert "documents" in result
     assert result["score"] > 0
+
+
+def test_get_search_includes_clause(policy_api):
+    finder, get_route, _ = policy_api
+    response = get_route.endpoint(
+        query="中国人民银行公告 第三条第一（一）项",
+        q=None,
+        topk="1",
+        include_documents=None,
+        documents=None,
+        finder_instance=finder,
+    )
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload.get("clause_reference") is not None
+    clause_ref = payload["clause_reference"]
+    assert clause_ref["article"] == 3
+    assert clause_ref.get("paragraph") == 1
+    assert clause_ref.get("item") == 1
+    assert payload["result_count"] == 1
+    clause_payload = payload["results"][0].get("clause")
+    assert clause_payload is not None
+    assert clause_payload.get("article_matched") is True
+    assert clause_payload.get("item_matched") is True
+    assert "建立健全外包管理制度" in clause_payload.get("item_text", "")
 
 
 def test_post_search_without_documents(policy_api):
