@@ -7,6 +7,7 @@ Usage:
 """
 
 from __future__ import annotations
+import io
 import json
 import re
 import sys
@@ -14,8 +15,16 @@ import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from zipfile import ZipFile
+
+import xml.etree.ElementTree as ET
 
 from bs4 import BeautifulSoup
+
+try:  # Optional dependency used for PDF extraction
+    from pdfminer.high_level import extract_text as _pdf_extract_text
+except Exception:  # pragma: no cover - optional dependency may be missing
+    _pdf_extract_text = None
 
 try:
     from icrawler.crawler import safe_filename as project_safe_filename  # type: ignore
@@ -236,7 +245,7 @@ def guess_agency(s: str) -> Optional[str]:
 def pick_best_path(documents: List[Dict[str, Any]]) -> Optional[str]:
     if not documents:
         return None
-    order = {'pdf': 3, 'html': 2, 'word': 1, 'doc': 1, 'docx': 1}
+    order = {'pdf': 4, 'docx': 3, 'doc': 3, 'word': 3, 'html': 2, 'txt': 1, 'text': 1}
     docs = sorted(documents, key=lambda d: order.get(d.get('type','').lower(), 0), reverse=True)
     for d in docs:
         p = d.get('local_path') or d.get('path') or d.get('localPath')
@@ -615,37 +624,71 @@ def _document_candidates(entry: Entry) -> Iterable[Tuple[str, Optional[str]]]:
         yield entry.best_path, None
 
 
-def _select_clause_document(entry: Entry) -> Optional[Tuple[Path, Optional[str]]]:
-    best_score = -1
-    best_candidate: Optional[Tuple[Path, Optional[str]]] = None
+def _extract_docx_text(data: bytes) -> Tuple[Optional[str], Optional[str]]:
+    """Extract plain text content from a docx payload."""
+
+    buffer = io.BytesIO(data)
+    try:
+        with ZipFile(buffer) as archive:
+            xml_data = archive.read("word/document.xml")
+    except KeyError:
+        return None, "docx_document_missing"
+    except Exception:
+        return None, "docx_read_error"
+
+    try:
+        root = ET.fromstring(xml_data)
+    except ET.ParseError:
+        return None, "docx_parse_error"
+
+    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    paragraphs: List[str] = []
+    for paragraph in root.findall(".//w:p", namespace):
+        runs: List[str] = []
+        for node in paragraph.findall(".//w:t", namespace):
+            if node.text:
+                runs.append(node.text)
+        if runs:
+            paragraphs.append("".join(runs))
+    text = "\n".join(paragraphs).strip()
+    if not text:
+        return None, "docx_empty"
+    return text, None
+
+
+def _select_clause_document(entry: Entry) -> List[Tuple[Path, Optional[str]]]:
+    ranked: List[Tuple[int, Path, Optional[str]]] = []
     for path_value, doc_type in _document_candidates(entry):
         resolved = _resolve_document_path(path_value)
         if not resolved:
             continue
         declared_type = (doc_type or "").lower() or None
         extension = resolved.suffix.lower()
-        if extension in {".htm", ".html"}:
+        if extension == ".pdf":
+            resolved_type = "pdf"
+        elif extension == ".docx":
+            resolved_type = "docx"
+        elif extension == ".doc":
+            resolved_type = "doc"
+        elif extension in {".htm", ".html"}:
             resolved_type = "html"
         elif extension in {".txt", ".text", ".md"}:
             resolved_type = "text"
-        elif extension == ".pdf":
-            resolved_type = "pdf"
-        elif extension in {".doc", ".docx"}:
-            resolved_type = "word"
         else:
             resolved_type = declared_type or extension.lstrip(".") or None
-        if resolved_type == "html":
+        if resolved_type == "pdf":
+            score = 5
+        elif resolved_type in {"docx", "doc", "word"}:
             score = 4
-        elif resolved_type in {"text", "txt"}:
+        elif resolved_type == "html":
             score = 3
-        elif resolved_type == "pdf":
+        elif resolved_type in {"text", "txt"}:
             score = 2
         else:
             score = 1
-        if score > best_score:
-            best_score = score
-            best_candidate = (resolved, resolved_type)
-    return best_candidate
+        ranked.append((score, resolved, resolved_type))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return [(path, resolved_type) for _score, path, resolved_type in ranked]
 
 
 def _load_document_text(
@@ -661,6 +704,10 @@ def _load_document_text(
         doc_type = "html"
     elif doc_type in {"txt", "text", "md"} or extension in {".txt", ".text", ".md"}:
         doc_type = "text"
+    elif doc_type in {"pdf"} or extension == ".pdf":
+        doc_type = "pdf"
+    elif doc_type in {"word", "doc", "docx"} or extension in {".doc", ".docx"}:
+        doc_type = "docx" if extension == ".docx" or doc_type == "docx" else doc_type or "word"
     elif not doc_type and extension:
         doc_type = extension.lstrip(".")
     if doc_type == "html":
@@ -673,6 +720,23 @@ def _load_document_text(
             tag.decompose()
         text = soup.get_text("\n", strip=True)
         return text, doc_type, None
+    if doc_type == "pdf":
+        if _pdf_extract_text is None:
+            return None, doc_type, "pdf_support_unavailable"
+        try:
+            text = _pdf_extract_text(io.BytesIO(data))
+        except Exception:
+            return None, doc_type, "pdf_parse_error"
+        if text:
+            text = text.strip()
+        if not text:
+            return None, doc_type, "pdf_empty"
+        return text, doc_type, None
+    if doc_type in {"docx", "word"}:
+        text, error = _extract_docx_text(data)
+        if error:
+            return None, doc_type, error
+        return text, "docx", None
     if doc_type in {"text", "txt", "md", "json"} or doc_type is None:
         text = _decode_bytes(data)
         return text, "text", None
@@ -740,25 +804,34 @@ def extract_clause_from_entry(
     entry: Entry, reference: ClauseReference
 ) -> ClauseResult:
     result = ClauseResult(reference=reference)
-    selected = _select_clause_document(entry)
-    if not selected:
+    candidates = _select_clause_document(entry)
+    if not candidates:
         result.error = "document_unavailable"
         return result
-    path, declared_type = selected
-    result.source_path = str(path)
-    text, doc_type, error = _load_document_text(path, declared_type)
-    if doc_type:
-        result.document_type = doc_type
-    if error or text is None:
-        result.error = error or "document_unavailable"
+    article_lines: List[str]
+    article_norm_lines: List[str]
+    last_error: Optional[str] = None
+
+    for path, declared_type in candidates:
+        candidate_text, doc_type, error = _load_document_text(path, declared_type)
+        if error or candidate_text is None:
+            last_error = error or "document_unavailable"
+            continue
+        lines, norm_lines = _prepare_clause_lines(candidate_text)
+        article_slice = _extract_article_slice(lines, norm_lines, reference)
+        if article_slice[0] is None or article_slice[1] is None:
+            if last_error is None:
+                last_error = "article_not_found"
+            continue
+        article_lines, article_norm_lines = article_slice
+        result.source_path = str(path)
+        if doc_type:
+            result.document_type = doc_type
+        break
+    else:
+        result.error = last_error or "document_unavailable"
         return result
-    lines, norm_lines = _prepare_clause_lines(text)
-    article_slice = _extract_article_slice(lines, norm_lines, reference)
-    if article_slice[0] is None or article_slice[1] is None:
-        result.article_matched = False
-        result.error = "article_not_found"
-        return result
-    article_lines, article_norm_lines = article_slice
+
     result.article_matched = True
     article_text = _compose_text(article_lines)
     result.article_text = article_text

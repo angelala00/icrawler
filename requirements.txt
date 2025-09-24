@@ -3,3 +3,4 @@ beautifulsoup4
 pdfkit
 fastapi
 uvicorn
+pdfminer.six
