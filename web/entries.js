@@ -296,6 +296,50 @@
     return Math.max(1, Math.min(searchMaxTopk, parsed));
   }
 
+  function parseBooleanParam(value) {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    const normalized = String(value).trim().toLowerCase();
+    if (!normalized) {
+      return true;
+    }
+    if (["1", "true", "yes", "on"].includes(normalized)) {
+      return true;
+    }
+    if (["0", "false", "no", "off"].includes(normalized)) {
+      return false;
+    }
+    return null;
+  }
+
+  function updateSearchParams(query, topk, includeDocuments) {
+    if (typeof window === "undefined" || typeof window.history === "undefined") {
+      return;
+    }
+    try {
+      const url = new URL(window.location.href);
+      if (query) {
+        url.searchParams.set("query", query);
+      } else {
+        url.searchParams.delete("query");
+      }
+      if (Number.isFinite(topk) && topk > 0) {
+        url.searchParams.set("topk", String(topk));
+      } else {
+        url.searchParams.delete("topk");
+      }
+      if (includeDocuments) {
+        url.searchParams.set("include_documents", "on");
+      } else {
+        url.searchParams.set("include_documents", "off");
+      }
+      window.history.replaceState(null, "", url.toString());
+    } catch (error) {
+      // Ignore failures updating the URL (e.g. invalid base URL in older browsers).
+    }
+  }
+
   function showSearchStatus(text, kind = "error") {
     if (!searchStatusEl) {
       return;
@@ -501,6 +545,7 @@
       : searchIncludeDocumentsDefault;
 
     await performSearch(query, topk, includeDocuments);
+    updateSearchParams(query, topk, includeDocuments);
   }
 
   function initSearch() {
@@ -525,21 +570,54 @@
     if (searchTopkInput) {
       searchTopkInput.min = "1";
       searchTopkInput.max = String(searchMaxTopk);
-      searchTopkInput.value = String(searchDefaultTopk);
+    }
+
+    const initialQueryParam = params.get("query");
+    const initialQuery = initialQueryParam ? initialQueryParam.trim() : "";
+
+    let initialTopk = searchDefaultTopk;
+    if (params.has("topk")) {
+      const topkParam = params.get("topk");
+      try {
+        initialTopk = clampTopk(topkParam);
+      } catch (error) {
+        initialTopk = searchDefaultTopk;
+      }
+    }
+    if (searchTopkInput) {
+      searchTopkInput.value = String(initialTopk);
+    }
+    let initialIncludeDocuments = searchIncludeDocumentsDefault;
+    if (params.has("include_documents")) {
+      const parsed = parseBooleanParam(params.get("include_documents"));
+      if (parsed !== null) {
+        initialIncludeDocuments = parsed;
+      }
     }
     if (searchIncludeDocumentsInput) {
-      searchIncludeDocumentsInput.checked = Boolean(
-        searchIncludeDocumentsDefault,
-      );
+      searchIncludeDocumentsInput.checked = Boolean(initialIncludeDocuments);
+    }
+    if (searchQueryInput) {
+      searchQueryInput.value = initialQuery;
     }
     if (searchResultsList) {
-      searchResultsList.innerHTML =
-        '<li class="empty">输入关键词后开始检索。</li>';
+      if (!initialQuery) {
+        searchResultsList.innerHTML =
+          '<li class="empty">输入关键词后开始检索。</li>';
+      }
     }
     hideSearchStatus();
 
     if (searchForm) {
       searchForm.addEventListener("submit", handleSearchSubmit);
+    }
+
+    if (initialQuery) {
+      performSearch(initialQuery, initialTopk, Boolean(initialIncludeDocuments)).catch(
+        (error) => {
+          console.error("Initial search request failed", error);
+        },
+      );
     }
   }
 

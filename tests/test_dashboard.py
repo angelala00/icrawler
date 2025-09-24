@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 
@@ -194,4 +195,28 @@ def test_entries_endpoint_returns_entries(tmp_path) -> None:
     assert isinstance(payload["entries"], list)
     assert len(payload["entries"]) == tasks_payload[0]["entries_total"]
     assert payload["entries"][0]["title"] == "Entry 1"
+
+
+def test_entries_page_includes_search_config(tmp_path) -> None:
+    config_path, _, _ = _prepare_dashboard_environment(tmp_path)
+
+    search_config = {"enabled": True, "endpoint": "/api/search"}
+
+    app = create_dashboard_app(
+        str(config_path),
+        auto_refresh=30,
+        task=None,
+        artifact_dir_override=None,
+        search_config=search_config,
+    )
+
+    entries_route = _get_app_route(app, "/entries.html", "GET")
+    response = entries_route.endpoint()
+    assert response.status_code == 200
+    html = response.body.decode("utf-8")
+
+    match = re.search(r"window\.__PBC_CONFIG__ = (.*?)</script>", html, re.DOTALL)
+    assert match is not None
+    config_payload = json.loads(match.group(1))
+    assert config_payload["search"] == search_config
 
