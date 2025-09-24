@@ -36,6 +36,7 @@ from .policy_finder import (
     Entry,
     PolicyFinder,
     default_state_path,
+    parse_clause_reference,
 )
 
 LOGGER = logging.getLogger("searcher.api")
@@ -100,16 +101,24 @@ def _search_payload(
     topk: int,
     include_documents: bool,
 ) -> Dict[str, Any]:
-    results = [
-        _entry_payload(entry, score, include_documents)
-        for entry, score in finder.search(query, topk=topk)
-    ]
-    return {
+    clause_ref = parse_clause_reference(query)
+    results_payload = []
+    for entry, score in finder.search(query, topk=topk):
+        payload = _entry_payload(entry, score, include_documents)
+        if clause_ref is not None:
+            clause_result = finder.extract_clause(entry, clause_ref)
+            payload["clause"] = clause_result.to_dict()
+        results_payload.append(payload)
+
+    response: Dict[str, Any] = {
         "query": query,
         "topk": topk,
-        "result_count": len(results),
-        "results": results,
+        "result_count": len(results_payload),
+        "results": results_payload,
     }
+    if clause_ref is not None:
+        response["clause_reference"] = clause_ref.to_dict()
+    return response
 
 
 def _parse_search_params(
