@@ -743,6 +743,14 @@ body.entries-page {
   gap: 1.5rem;
 }
 
+.entries-card .entries-search {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.85rem;
+  padding: 1.25rem 1.5rem;
+  box-shadow: none;
+}
+
 .entries-card__meta {
   font-size: 0.95rem;
   color: #475569;
@@ -868,6 +876,10 @@ body.entries-page {
 
   .entries-card {
     padding: 1.5rem;
+  }
+
+  .entries-card .entries-search {
+    padding: 1.1rem 1.25rem;
   }
 
   .entries-filters {
