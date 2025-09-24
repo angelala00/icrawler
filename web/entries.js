@@ -19,6 +19,7 @@
   const searchIncludeDocumentsInput = document.getElementById(
     "search-include-documents",
   );
+  const searchSubmitButton = document.getElementById("search-submit");
   const searchResultsList = document.getElementById("search-results");
   const searchStatusEl = document.getElementById("search-status");
 
@@ -45,10 +46,6 @@
     selectedSlugs: new Set(initialSlugs),
     slugOptions: [],
     showAbolishOnly: false,
-    searchQuery: "",
-    searchTokens: [],
-    searchTopk: searchDefaultTopk,
-    searchIncludeDocuments: searchIncludeDocumentsDefault,
   };
   const slugButtons = new Map();
   const entriesCache = new Map();
@@ -58,6 +55,12 @@
       ? config.search
       : {};
   const searchEnabled = Boolean(searchConfig.enabled) && !staticSnapshot;
+  const searchEndpoint = buildUrl(
+    apiBase,
+    typeof searchConfig.endpoint === "string" && searchConfig.endpoint
+      ? searchConfig.endpoint
+      : "/api/search",
+  );
   const searchDefaultTopk =
     typeof searchConfig.defaultTopk === "number" && searchConfig.defaultTopk > 0
       ? searchConfig.defaultTopk
@@ -72,6 +75,9 @@
     ? "静态快照模式下无法检索政策条目。"
     : typeof searchConfig.reason === "string"
     ? searchConfig.reason
+    : "";
+  const searchSubmitLabel = searchSubmitButton
+    ? searchSubmitButton.textContent
     : "";
 
   function buildUrl(base, path) {
@@ -220,61 +226,6 @@
     return typeof value === "string" && value.includes(keyword);
   }
 
-  function normaliseSearchText(value) {
-    if (value === null || value === undefined) {
-      return "";
-    }
-    return String(value)
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase();
-  }
-
-  function extractSearchTokens(query) {
-    if (!query) {
-      return [];
-    }
-    return query
-      .split(/[\s,;；，。]+/)
-      .map((part) => normaliseSearchText(part))
-      .filter(Boolean);
-  }
-
-  function entryMatchesTokens(entry, tokens) {
-    if (!tokens.length) {
-      return true;
-    }
-    if (!entry || typeof entry !== "object") {
-      return false;
-    }
-    const pieces = [];
-    const addPiece = (value) => {
-      const normalised = normaliseSearchText(value);
-      if (normalised) {
-        pieces.push(normalised);
-      }
-    };
-    addPiece(entry.title);
-    addPiece(entry.remark);
-    addPiece(entry.__taskName);
-    addPiece(entry.__taskSlug);
-    const documents = Array.isArray(entry.documents) ? entry.documents : [];
-    documents.forEach((doc) => {
-      if (!doc || typeof doc !== "object") {
-        return;
-      }
-      addPiece(doc.title);
-      addPiece(doc.type);
-      addPiece(doc.url);
-      addPiece(doc.local_path);
-    });
-    if (!pieces.length) {
-      return false;
-    }
-    const haystack = pieces.join(" ");
-    return tokens.every((token) => haystack.includes(token));
-  }
-
   function isAbolishEntry(entry) {
     if (!entry || typeof entry !== "object") {
       return false;
@@ -325,6 +276,13 @@
       const docs = Array.isArray(entry && entry.documents) ? entry.documents : [];
       return acc + docs.length;
     }, 0);
+  }
+
+  function formatScore(value) {
+    if (typeof value !== "number" || Number.isNaN(value)) {
+      return "—";
+    }
+    return value.toFixed(3);
   }
 
   function clampTopk(value) {
@@ -395,36 +353,162 @@
     if (!searchStatusEl) {
       return;
     }
-    if (!searchEnabled) {
-      searchStatusEl.textContent = "";
-      searchStatusEl.classList.add("hidden");
-      searchStatusEl.classList.remove("info");
-      return;
-    }
-    searchStatusEl.textContent = "输入关键词并点击“开始检索”后，将直接筛选左侧条目列表。";
-    searchStatusEl.classList.remove("hidden");
-    searchStatusEl.classList.add("info");
+    searchStatusEl.textContent = "";
+    searchStatusEl.classList.add("hidden");
+    searchStatusEl.classList.remove("info");
   }
 
-  function updateSearchStatusSummary(searchActive, query, totalMatches, displayedMatches) {
-    if (!searchStatusEl || !searchEnabled) {
+  function setSearchLoading(isLoading) {
+    if (searchSubmitButton) {
+      searchSubmitButton.disabled = Boolean(isLoading);
+      searchSubmitButton.textContent = isLoading
+        ? "检索中…"
+        : searchSubmitLabel;
+    }
+    if (searchForm) {
+      searchForm.classList.toggle("is-loading", Boolean(isLoading));
+    }
+  }
+
+  function renderSearchResults(results) {
+    if (!searchResultsList) {
       return;
     }
-    if (!searchActive) {
-      hideSearchStatus();
+    if (!Array.isArray(results) || results.length === 0) {
+      searchResultsList.innerHTML =
+        '<li class="empty">未找到匹配结果。</li>';
       return;
     }
-    let message = "";
-    if (!totalMatches) {
-      message = `关键词“${query || ""}”未找到匹配条目。`;
-    } else if (displayedMatches < totalMatches) {
-      message = `关键词“${query || ""}”匹配 ${totalMatches} 条条目，已显示前 ${displayedMatches} 条。`;
-    } else {
-      message = `关键词“${query || ""}”匹配 ${totalMatches} 条条目。`;
+
+    const items = results
+      .map((result) => {
+        const title = escapeHtml(result.title || "未命名条目");
+        const score = escapeHtml(formatScore(result.score));
+        const pills = [];
+        if (result.doc_no) {
+          pills.push(`<span class="pill">文号 ${escapeHtml(result.doc_no)}</span>`);
+        }
+        if (result.year) {
+          pills.push(`<span class="pill">${escapeHtml(result.year)}</span>`);
+        }
+        if (result.doctype) {
+          pills.push(`<span class="pill">${escapeHtml(result.doctype)}</span>`);
+        }
+        if (result.agency) {
+          pills.push(`<span class="pill">${escapeHtml(result.agency)}</span>`);
+        }
+        const meta = pills.length
+          ? `<div class="result-meta">${pills.join(" ")}</div>`
+          : "";
+        const remark = result.remark
+          ? `<div class="result-remark">${escapeHtml(result.remark)}</div>`
+          : "";
+        const bestPath = result.best_path
+          ? `<div class="result-path"><span class="label">最佳路径</span><code>${escapeHtml(
+              result.best_path,
+            )}</code></div>`
+          : "";
+
+        let documentsHtml = "";
+        if (Array.isArray(result.documents) && result.documents.length) {
+          const documents = result.documents
+            .map((doc) => {
+              const parts = [];
+              if (doc.title) {
+                parts.push(`<span class="doc-title">${escapeHtml(doc.title)}</span>`);
+              }
+              if (doc.type) {
+                parts.push(`<span class="doc-type">${escapeHtml(doc.type)}</span>`);
+              }
+              if (doc.url) {
+                parts.push(
+                  `<a href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">原文</a>`,
+                );
+              }
+              if (!parts.length && doc.local_path) {
+                parts.push(`<code>${escapeHtml(doc.local_path)}</code>`);
+              }
+              return `<li>${parts.join(" · ") || "文档"}</li>`;
+            })
+            .join("");
+          documentsHtml = `
+            <details class="result-documents">
+              <summary>相关文档 (${escapeHtml(result.documents.length)})</summary>
+              <ul>${documents}</ul>
+            </details>
+          `;
+        }
+
+        return `
+          <li class="search-result">
+            <div class="result-header">
+              <div class="result-title">${title}</div>
+              <div class="result-score">相似度 ${score}</div>
+            </div>
+            ${meta}
+            ${remark}
+            ${bestPath}
+            ${documentsHtml}
+          </li>
+        `;
+      })
+      .join("");
+
+    searchResultsList.innerHTML = items;
+  }
+
+  async function performSearch(query, topk, includeDocuments) {
+    if (!searchEnabled) {
+      return;
     }
-    searchStatusEl.textContent = message;
-    searchStatusEl.classList.remove("hidden");
-    searchStatusEl.classList.add("info");
+    setSearchLoading(true);
+    showSearchStatus("检索中…", "info");
+    try {
+      const response = await fetch(searchEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          query,
+          topk,
+          include_documents: includeDocuments,
+        }),
+      });
+      if (!response.ok) {
+        let message = `${response.status} ${response.statusText}`;
+        try {
+          const errorPayload = await response.json();
+          if (errorPayload && typeof errorPayload === "object") {
+            if (typeof errorPayload.reason === "string") {
+              message = `${errorPayload.error || "error"}: ${errorPayload.reason}`;
+            } else if (errorPayload.error) {
+              message = String(errorPayload.error);
+            }
+          }
+        } catch (parseError) {
+          // Ignore JSON parsing errors for error responses.
+        }
+        throw new Error(message);
+      }
+      const payload = await response.json();
+      if (!payload || typeof payload !== "object") {
+        throw new Error("Unexpected response format");
+      }
+      const results = Array.isArray(payload.results) ? payload.results : [];
+      renderSearchResults(results);
+      const count =
+        typeof payload.result_count === "number"
+          ? payload.result_count
+          : results.length;
+      showSearchStatus(`共返回 ${count} 条结果。`, "info");
+    } catch (error) {
+      console.error("Search request failed", error);
+      showSearchStatus(`检索失败：${error.message || error}`);
+    } finally {
+      setSearchLoading(false);
+    }
   }
 
   async function handleSearchSubmit(event) {
@@ -433,7 +517,17 @@
       return;
     }
     const query = searchQueryInput ? searchQueryInput.value.trim() : "";
-    const tokens = extractSearchTokens(query);
+    if (!query) {
+      showSearchStatus("请输入关键词。");
+      if (searchResultsList) {
+        searchResultsList.innerHTML =
+          '<li class="empty">请输入关键词开始检索。</li>';
+      }
+      if (searchQueryInput) {
+        searchQueryInput.focus();
+      }
+      return;
+    }
 
     let topk = searchDefaultTopk;
     if (searchTopkInput) {
@@ -450,14 +544,8 @@
       ? Boolean(searchIncludeDocumentsInput.checked)
       : searchIncludeDocumentsDefault;
 
-    state.searchQuery = query;
-    state.searchTokens = tokens;
-    state.searchTopk = topk;
-    state.searchIncludeDocuments = includeDocuments;
-
-    const topkParam = tokens.length ? topk : null;
-    updateSearchParams(query, topkParam, includeDocuments);
-    await refreshEntries();
+    await performSearch(query, topk, includeDocuments);
+    updateSearchParams(query, topk, includeDocuments);
   }
 
   function initSearch() {
@@ -513,19 +601,23 @@
       searchQueryInput.value = initialQuery;
     }
     if (searchResultsList) {
-      searchResultsList.innerHTML =
-        '<li class="empty">搜索条件会直接作用于左侧条目列表。</li>';
+      if (!initialQuery) {
+        searchResultsList.innerHTML =
+          '<li class="empty">输入关键词后开始检索。</li>';
+      }
     }
-
-    state.searchQuery = initialQuery;
-    state.searchTokens = extractSearchTokens(initialQuery);
-    state.searchTopk = initialTopk;
-    state.searchIncludeDocuments = Boolean(initialIncludeDocuments);
-
     hideSearchStatus();
 
     if (searchForm) {
       searchForm.addEventListener("submit", handleSearchSubmit);
+    }
+
+    if (initialQuery) {
+      performSearch(initialQuery, initialTopk, Boolean(initialIncludeDocuments)).catch(
+        (error) => {
+          console.error("Initial search request failed", error);
+        },
+      );
     }
   }
 
@@ -680,7 +772,6 @@
     const settings = options || {};
     const showSource = Boolean(settings.showSource);
     const highlightAbolish = settings.highlightAbolish !== false;
-    const showDocuments = settings.showDocuments !== false;
     const items = entries
       .map((entry, index) => {
         if (!entry || typeof entry !== "object") {
@@ -731,58 +822,48 @@
             : "";
         const documents = Array.isArray(entry.documents) ? entry.documents : [];
         let documentsHtml;
-        if (showDocuments) {
-          if (documents.length) {
-            const docItems = documents
-              .map((doc) => {
-                const titleValue =
-                  doc && doc.title
-                    ? doc.title
-                    : doc && doc.url
-                    ? doc.url
-                    : doc && doc.local_path
-                    ? doc.local_path
-                    : "未命名文档";
-                const link =
-                  doc && doc.url
-                    ? '<a href="' +
-                      escapeHtml(doc.url) +
-                      '" target="_blank" rel="noopener">' +
-                      escapeHtml(titleValue) +
-                      "</a>"
-                    : '<span>' + escapeHtml(titleValue) + "</span>";
-                const metaPieces = [];
-                if (doc && doc.type) {
-                  metaPieces.push(
-                    '<span class="entries-documents__meta">' +
-                      escapeHtml(doc.type) +
-                      "</span>",
-                  );
-                }
-                if (doc && doc.local_path) {
-                  metaPieces.push(
-                    '<span class="entries-documents__meta"><code>' +
-                      escapeHtml(doc.local_path) +
-                      "</code></span>",
-                  );
-                }
-                if (doc && doc.downloaded) {
-                  metaPieces.push('<span class="entries-documents__badge">已下载</span>');
-                }
-                const metaHtml = metaPieces.length ? " " + metaPieces.join(" ") : "";
-                return `<li>${link}${metaHtml}</li>`;
-              })
-              .join("");
-            documentsHtml = `<ul class="entries-documents">${docItems}</ul>`;
-          } else {
-            documentsHtml =
-              '<div class="entries-documents entries-documents--empty">暂无关联文档</div>';
-          }
-        } else if (documents.length) {
-          documentsHtml =
-            '<div class="entries-documents entries-documents--collapsed">已匹配 ' +
-            escapeHtml(documents.length) +
-            ' 个关联文档，未展开显示。</div>';
+        if (documents.length) {
+          const docItems = documents
+            .map((doc) => {
+              const titleValue =
+                doc && doc.title
+                  ? doc.title
+                  : doc && doc.url
+                  ? doc.url
+                  : doc && doc.local_path
+                  ? doc.local_path
+                  : "未命名文档";
+              const link =
+                doc && doc.url
+                  ? '<a href="' +
+                    escapeHtml(doc.url) +
+                    '" target="_blank" rel="noopener">' +
+                    escapeHtml(titleValue) +
+                    "</a>"
+                  : '<span>' + escapeHtml(titleValue) + "</span>";
+              const metaPieces = [];
+              if (doc && doc.type) {
+                metaPieces.push(
+                  '<span class="entries-documents__meta">' +
+                    escapeHtml(doc.type) +
+                    "</span>",
+                );
+              }
+              if (doc && doc.local_path) {
+                metaPieces.push(
+                  '<span class="entries-documents__meta"><code>' +
+                    escapeHtml(doc.local_path) +
+                    "</code></span>",
+                );
+              }
+              if (doc && doc.downloaded) {
+                metaPieces.push('<span class="entries-documents__badge">已下载</span>');
+              }
+              const metaHtml = metaPieces.length ? " " + metaPieces.join(" ") : "";
+              return `<li>${link}${metaHtml}</li>`;
+            })
+            .join("");
+          documentsHtml = `<ul class="entries-documents">${docItems}</ul>`;
         } else {
           documentsHtml =
             '<div class="entries-documents entries-documents--empty">暂无关联文档</div>';
@@ -854,98 +935,38 @@
     metaEl.textContent = parts.join(" · ") || "—";
   }
 
-  function updateSelectionSummary(
-    activeSlugs,
-    combinedEntries,
-    abolishFiltered,
-    searchFiltered,
-    displayEntries,
-  ) {
+  function updateSelectionSummary(activeSlugs, combinedEntries, filteredEntries) {
     const totalEntriesCount = combinedEntries.length;
-    const abolishCount = abolishFiltered.length;
-    const searchCount = searchFiltered.length;
-    const displayedCount = displayEntries.length;
+    const filteredCount = filteredEntries.length;
     const docsTotal = computeDocsCount(combinedEntries);
-    const docsAbolish = computeDocsCount(abolishFiltered);
-    const docsSearch = computeDocsCount(searchFiltered);
-    const docsDisplayed = computeDocsCount(displayEntries);
+    const docsFiltered = computeDocsCount(filteredEntries);
     const filterActive = state.showAbolishOnly;
-    const searchActive = Boolean(state.searchTokens.length);
-    const limitActive =
-      searchActive &&
-      Number.isFinite(state.searchTopk) &&
-      state.searchTopk > 0 &&
-      displayedCount < searchCount;
 
     if (activeSlugs.length === 1) {
       const slugValue = activeSlugs[0];
       const cached = entriesCache.get(slugValue);
       const task = cached ? cached.task : null;
       let entriesForHeader = [];
-      if (searchActive) {
-        entriesForHeader = searchFiltered;
-      } else if (filterActive && cached) {
-        entriesForHeader = abolishFiltered;
+      if (filterActive && cached) {
+        entriesForHeader = filteredEntries;
       } else if (cached && Array.isArray(cached.entries)) {
         entriesForHeader = cached.entries;
       }
       updateHeader(task, entriesForHeader);
-      if (subtitleEl) {
-        let subtitle = subtitleEl.textContent || "";
-        if (filterActive && abolishCount !== totalEntriesCount) {
-          const suffix = `筛选后 ${abolishCount} 条目`;
-          subtitle = subtitle ? `${subtitle} · ${suffix}` : suffix;
-        }
-        if (searchActive) {
-          let searchSuffix = `关键词匹配 ${searchCount} 条`;
-          if (limitActive) {
-            searchSuffix = `关键词匹配 ${displayedCount}/${searchCount} 条`;
-          }
-          subtitle = subtitle ? `${subtitle} · ${searchSuffix}` : searchSuffix;
-        }
-        subtitleEl.textContent = subtitle;
+      if (filterActive && subtitleEl && filteredCount !== totalEntriesCount) {
+        const suffix = `筛选后 ${filteredCount} 条目`;
+        subtitleEl.textContent = subtitleEl.textContent
+          ? `${subtitleEl.textContent} · ${suffix}`
+          : suffix;
       }
       updateMeta(task, cached && Array.isArray(cached.entries) ? cached.entries : []);
-      if (metaEl) {
+      if (metaEl && filterActive) {
         const base = metaEl.textContent || "";
-        const additions = [];
-        if (filterActive && abolishCount !== totalEntriesCount) {
-          let addition = `筛选 ${abolishCount} 条`;
-          if (docsTotal && docsAbolish !== docsTotal) {
-            addition += ` / ${docsAbolish} 个文档`;
-          }
-          additions.push(addition);
+        let addition = `筛选 ${filteredCount} 条`;
+        if (docsTotal && docsFiltered !== docsTotal) {
+          addition += ` / ${docsFiltered} 个文档`;
         }
-        if (searchActive) {
-          let addition = `关键词 ${state.searchQuery || ""}`.trim();
-          addition = addition.replace(/\s+/g, " ");
-          if (addition === "关键词") {
-            addition = "关键词";
-          }
-          if (searchCount) {
-            addition += addition === "关键词" ? "匹配" : " 匹配";
-            if (limitActive) {
-              addition += ` ${displayedCount}/${searchCount} 条`;
-            } else {
-              addition += ` ${searchCount} 条`;
-            }
-            if (docsSearch) {
-              if (docsDisplayed !== docsSearch) {
-                addition += ` / 文档 ${docsDisplayed}/${docsSearch}`;
-              } else {
-                addition += ` / 文档 ${docsSearch}`;
-              }
-            }
-          } else {
-            addition += addition === "关键词" ? "未匹配到条目" : " 未匹配到条目";
-          }
-          additions.push(addition);
-        }
-        if (additions.length) {
-          metaEl.textContent = base ? `${base} · ${additions.join(" · ")}` : additions.join(" · ");
-        } else {
-          metaEl.textContent = base;
-        }
+        metaEl.textContent = base ? `${base} · ${addition}` : addition;
       }
       return;
     }
@@ -959,23 +980,11 @@
       const tasksLabel = activeSlugs.length
         ? `已选 ${activeSlugs.length} 个任务`
         : "全部任务";
-      const pieces = [tasksLabel];
-      if (filterActive && abolishCount !== totalEntriesCount) {
-        pieces.push(`条目 ${abolishCount}/${totalEntriesCount}`);
-      } else {
-        pieces.push(`条目 ${displayedCount}`);
+      let entriesPart = `条目数 ${filteredCount}`;
+      if (filterActive && filteredCount !== totalEntriesCount) {
+        entriesPart = `条目数 ${filteredCount}/${totalEntriesCount}`;
       }
-      if (searchActive) {
-        if (searchCount) {
-          const searchLabel = limitActive
-            ? `关键词匹配 ${displayedCount}/${searchCount} 条`
-            : `关键词匹配 ${searchCount} 条`;
-          pieces.push(searchLabel);
-        } else {
-          pieces.push("关键词未匹配条目");
-        }
-      }
-      subtitleEl.textContent = pieces.join(" · ");
+      subtitleEl.textContent = `${tasksLabel} · ${entriesPart}`;
     }
 
     if (metaEl) {
@@ -984,22 +993,14 @@
       if (totalTasks) {
         pieces.push(`任务 ${totalTasks}`);
       }
-      if (filterActive && abolishCount !== totalEntriesCount) {
-        pieces.push(`条目 ${abolishCount}/${totalEntriesCount}`);
-      } else if (searchActive) {
-        pieces.push(`条目 ${displayedCount}`);
+      if (filterActive && filteredCount !== totalEntriesCount) {
+        pieces.push(`条目 ${filteredCount}/${totalEntriesCount}`);
       } else {
-        pieces.push(`条目 ${displayedCount}`);
+        pieces.push(`条目 ${filteredCount}`);
       }
       if (docsTotal) {
-        if (filterActive && docsAbolish !== docsTotal) {
-          pieces.push(`文档 ${docsAbolish}/${docsTotal}`);
-        } else if (searchActive && docsSearch) {
-          if (docsDisplayed !== docsSearch) {
-            pieces.push(`文档 ${docsDisplayed}/${docsSearch}`);
-          } else {
-            pieces.push(`文档 ${docsSearch}`);
-          }
+        if (filterActive && docsFiltered !== docsTotal) {
+          pieces.push(`文档 ${docsFiltered}/${docsTotal}`);
         } else {
           pieces.push(`文档 ${docsTotal}`);
         }
@@ -1057,63 +1058,29 @@
     }
 
     const combinedEntries = collectEntries(usableSlugs);
-    const abolishFiltered = state.showAbolishOnly
+    const filteredEntries = state.showAbolishOnly
       ? combinedEntries.filter((entry) => entry && entry.__isAbolish)
       : combinedEntries;
-    const searchTokens = Array.isArray(state.searchTokens)
-      ? state.searchTokens
-      : [];
-    const searchActive = Boolean(searchTokens.length);
-    const searchFiltered = searchActive
-      ? abolishFiltered.filter((entry) => entryMatchesTokens(entry, searchTokens))
-      : abolishFiltered;
-    const topkLimit =
-      searchActive && Number.isFinite(state.searchTopk) && state.searchTopk > 0
-        ? state.searchTopk
-        : null;
-    const displayEntries =
-      topkLimit !== null ? searchFiltered.slice(0, topkLimit) : searchFiltered;
 
-    if (!displayEntries.length) {
+    if (!filteredEntries.length) {
       if (bodyEl) {
-        let message;
-        if (!combinedEntries.length && !state.showAbolishOnly && !searchActive) {
-          message = '<p class="empty">暂无条目。</p>';
-        } else if (!searchFiltered.length && searchActive) {
-          message = '<p class="empty">没有符合搜索条件的条目。</p>';
-        } else if (!abolishFiltered.length && state.showAbolishOnly) {
-          message = '<p class="empty">没有符合筛选条件的条目。</p>';
-        } else if (!combinedEntries.length) {
-          message = '<p class="empty">暂无条目。</p>';
-        } else {
-          message = '<p class="empty">没有符合筛选条件的条目。</p>';
-        }
+        const message =
+          !combinedEntries.length && !state.showAbolishOnly
+            ? '<p class="empty">暂无条目。</p>'
+            : '<p class="empty">没有符合筛选条件的条目。</p>';
         bodyEl.innerHTML = message;
       }
     } else if (bodyEl) {
       const showSourceBadges =
         state.selectedSlugs.size > 1 ||
         (!state.selectedSlugs.size && usableSlugs.length > 1);
-      bodyEl.innerHTML = renderEntriesList(displayEntries, {
+      bodyEl.innerHTML = renderEntriesList(filteredEntries, {
         showSource: showSourceBadges,
         highlightAbolish: true,
-        showDocuments: !searchActive || state.searchIncludeDocuments,
       });
     }
 
-    updateSelectionSummary(
-      usableSlugs,
-      combinedEntries,
-      abolishFiltered,
-      searchFiltered,
-      displayEntries,
-    );
-    updateSearchStatusSummary(
-      searchActive,
-      state.searchQuery,
-      searchFiltered.length,
-      displayEntries.length,
-    );
+    updateSelectionSummary(usableSlugs, combinedEntries, filteredEntries);
   }
 
   async function init() {
