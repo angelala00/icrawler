@@ -666,6 +666,16 @@ footer {
   font-style: italic;
 }
 
+.entries-documents--collapsed {
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+  color: #475569;
+  background: #f8fafc;
+  border: 1px dashed #cbd5f5;
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
 body.entries-page {
   background: #f4f6fb;
   color: #1f2933;
