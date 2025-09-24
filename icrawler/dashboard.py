@@ -377,7 +377,11 @@ def _render_index_html(
 
 
 def _render_entries_html(
-    *, generated_at: datetime, static_snapshot: bool = False, api_base: str = ""
+    *,
+    generated_at: datetime,
+    static_snapshot: bool = False,
+    api_base: str = "",
+    search_config: Optional[Dict[str, object]] = None,
 ) -> str:
     template = _cached_entries_template()
     config: Dict[str, object] = {
@@ -385,6 +389,8 @@ def _render_entries_html(
         "staticSnapshot": static_snapshot,
         "apiBase": api_base,
     }
+    if search_config is not None:
+        config["search"] = search_config
     return _render_template_with_config(template, config)
 
 
@@ -521,6 +527,7 @@ def create_dashboard_app(
             html = _render_entries_html(
                 generated_at=datetime.now(),
                 api_base="",
+                search_config=search_payload,
             )
         except FileNotFoundError as exc:  # pragma: no cover - configuration issue
             message = f"Dashboard error: {exc}"
