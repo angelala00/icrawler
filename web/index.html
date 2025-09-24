@@ -72,49 +72,6 @@
         </table>
       </div>
       <div class="message hidden" id="status-message"></div>
-      <section class="search-panel" id="search-panel">
-        <div class="search-panel__header">
-          <h2>政策检索</h2>
-          <p>查询已抓取任务中的政策条目，快速定位关键文档。</p>
-        </div>
-        <form id="search-form" class="search-form" autocomplete="off">
-          <label class="field field--grow" for="search-query">
-            关键词
-            <input
-              type="text"
-              id="search-query"
-              name="query"
-              placeholder="请输入关键词，例如 金融监管"
-              required
-            />
-          </label>
-          <label class="field" for="search-topk">
-            返回数量
-            <input
-              type="number"
-              id="search-topk"
-              name="topk"
-              min="1"
-              max="50"
-              value="5"
-            />
-          </label>
-          <label class="field field--checkbox" for="search-include-documents">
-            <input
-              type="checkbox"
-              id="search-include-documents"
-              name="include_documents"
-              checked
-            />
-            <span>包含文档详情</span>
-          </label>
-          <button type="submit" id="search-submit">开始检索</button>
-        </form>
-        <div class="message hidden" id="search-status"></div>
-        <ol id="search-results" class="search-results">
-          <li class="empty">输入关键词后开始检索。</li>
-        </ol>
-      </section>
     </main>
     <footer>
       PBC Monitor dashboard &middot; Generated at
