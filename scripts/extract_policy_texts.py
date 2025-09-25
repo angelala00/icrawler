@@ -152,6 +152,10 @@ def _discover_task_plans(
             if not resolved_state:
                 continue
             state_path = Path(resolved_state)
+            if not state_path.exists():
+                legacy_state = artifact_dir / "downloads" / default_state_filename
+                if legacy_state.exists():
+                    state_path = legacy_state
             plan = TaskPlan(display_name=display_name, state_file=state_path, slug=slug)
             plans.append(plan)
             seen_paths[state_path.resolve()] = plan
@@ -330,6 +334,14 @@ def main() -> None:  # pragma: no cover - exercised via integration tests
             summary_path = summary_root / f"extract_{slug}.json"
         summary_path.parent.mkdir(parents=True, exist_ok=True)
 
+        print("==============================")
+        print(f"任务: {plan.display_name} (slug: {slug})")
+        print(f"State 文件: {state_path}")
+        print(f"文本输出目录: {output_dir}")
+        print(f"更新后的 state 文件: {output_state_path}")
+        print(f"摘要结果: {summary_path}")
+        print("开始提取文本...")
+
         report, state_data = run(state_path, output_dir, output_state_path)
         payload = _build_summary_payload(
             plan=TaskPlan(plan.display_name, state_path, slug),
@@ -340,12 +352,6 @@ def main() -> None:  # pragma: no cover - exercised via integration tests
         )
         summary_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
-        print("==============================")
-        print(f"任务: {plan.display_name} (slug: {slug})")
-        print(f"State 文件: {state_path}")
-        print(f"文本输出目录: {output_dir}")
-        print(f"更新后的 state 文件: {output_state_path}")
-        print(f"摘要结果: {summary_path}")
         print(_format_summary(report))
 
 
