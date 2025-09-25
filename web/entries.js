@@ -49,7 +49,6 @@
   };
   const slugButtons = new Map();
   const entriesCache = new Map();
-  const pendingLoads = new Map();
   const searchConfig =
     config && typeof config.search === "object" && config.search
       ? config.search
@@ -646,14 +645,22 @@
     }
   }
 
-  async function fetchTaskEntries(slugValue) {
-    const response = await fetch(
-      buildUrl(apiBase, `/api/tasks/${encodeURIComponent(slugValue)}/entries`),
-      {
-        headers: { Accept: "application/json" },
-        cache: "no-store",
-      },
-    );
+  async function fetchMultipleTaskEntries(slugValues) {
+    const validSlugs = Array.isArray(slugValues)
+      ? slugValues
+          .map((value) => (value || value === 0 ? String(value).trim() : ""))
+          .filter(Boolean)
+      : [];
+    const params = new URLSearchParams();
+    validSlugs.forEach((slug) => {
+      params.append("slugs", slug);
+    });
+    const baseUrl = buildUrl(apiBase, "/api/tasks/entries");
+    const requestUrl = params.toString() ? `${baseUrl}?${params}` : baseUrl;
+    const response = await fetch(requestUrl, {
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    });
     if (!response.ok) {
       let errorDetail = `${response.status} ${response.statusText}`;
       try {
@@ -667,63 +674,88 @@
       throw new Error(errorDetail);
     }
     const payload = await response.json();
-    const entries = Array.isArray(payload.entries) ? payload.entries : [];
-    const taskInfo =
-      payload && typeof payload.task === "object" ? payload.task : null;
-    return { entries, task: taskInfo };
-  }
-
-  async function loadEntriesForSlug(slugValue) {
-    if (!slugValue && slugValue !== 0) {
-      return null;
-    }
-    const slugString = String(slugValue);
-    if (!slugString) {
-      return null;
-    }
-    if (entriesCache.has(slugString)) {
-      return entriesCache.get(slugString);
-    }
-    if (pendingLoads.has(slugString)) {
-      return pendingLoads.get(slugString);
-    }
-    const promise = (async () => {
-      const { entries, task } = await fetchTaskEntries(slugString);
-      registerKnownSlug(slugString, task);
-      const normalized = normalizeEntries(entries, slugString, task);
-      const cacheValue = { entries: normalized, task: task || null };
-      entriesCache.set(slugString, cacheValue);
-      return cacheValue;
-    })();
-    pendingLoads.set(slugString, promise);
-    try {
-      return await promise;
-    } finally {
-      pendingLoads.delete(slugString);
-    }
+    const results = Array.isArray(payload.results) ? payload.results : [];
+    const errors = Array.isArray(payload.errors) ? payload.errors : [];
+    return { results, errors };
   }
 
   async function ensureEntriesForSlugs(slugs) {
-    const unique = Array.from(new Set(slugs.filter(Boolean)));
+    const normalizedSlugs = Array.isArray(slugs)
+      ? slugs
+          .map((value) => (value || value === 0 ? String(value) : ""))
+          .filter(Boolean)
+      : [];
+    const unique = Array.from(new Set(normalizedSlugs));
     if (!unique.length) {
       return { succeeded: [], failed: [] };
     }
-    const results = await Promise.all(
-      unique.map((slugValue) =>
-        loadEntriesForSlug(slugValue)
-          .then(() => ({ slug: slugValue, status: "fulfilled" }))
-          .catch((error) => ({ slug: slugValue, status: "rejected", error })),
-      ),
-    );
+
+    const missing = unique.filter((slug) => !entriesCache.has(slug));
     const succeeded = [];
     const failed = [];
-    results.forEach((result) => {
-      if (result.status === "fulfilled") {
-        succeeded.push(result.slug);
-      } else {
-        failed.push(result);
+
+    if (missing.length) {
+      const { results, errors } = await fetchMultipleTaskEntries(missing);
+      const handled = new Set();
+
+      if (Array.isArray(results)) {
+        results.forEach((item) => {
+          if (!item || typeof item !== "object") {
+            return;
+          }
+          if (item.slug === null || item.slug === undefined) {
+            return;
+          }
+          const slugValue = String(item.slug);
+          const entries = Array.isArray(item.entries) ? item.entries : [];
+          const taskInfo =
+            item && typeof item.task === "object" ? item.task : null;
+          registerKnownSlug(slugValue, taskInfo);
+          const normalized = normalizeEntries(entries, slugValue, taskInfo);
+          entriesCache.set(slugValue, {
+            entries: normalized,
+            task: taskInfo || null,
+          });
+          handled.add(slugValue);
+          if (!succeeded.includes(slugValue)) {
+            succeeded.push(slugValue);
+          }
+        });
+      }
+
+      if (Array.isArray(errors)) {
+        errors.forEach((item) => {
+          if (!item || typeof item !== "object") {
+            return;
+          }
+          if (item.slug === null || item.slug === undefined) {
+            return;
+          }
+          const slugValue = String(item.slug);
+          handled.add(slugValue);
+          const reason =
+            typeof item.error === "string" ? item.error : "未知错误";
+          failed.push({ slug: slugValue, error: new Error(reason) });
+        });
+      }
+
+      missing.forEach((slug) => {
+        if (!handled.has(slug) && !failed.some((item) => item.slug === slug)) {
+          failed.push({ slug, error: new Error("未返回任务数据") });
+        }
+      });
+    }
+
+    unique.forEach((slug) => {
+      if (
+        entriesCache.has(slug) &&
+        !succeeded.includes(slug) &&
+        !failed.some((item) => item.slug === slug)
+      ) {
+        succeeded.push(slug);
       }
     });
+
     return { succeeded, failed };
   }
 

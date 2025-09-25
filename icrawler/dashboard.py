@@ -25,13 +25,14 @@ from .runner import (
 from .state import PBCState
 
 try:  # pragma: no cover - optional dependency during import
-    from fastapi import FastAPI, HTTPException, Request
+    from fastapi import FastAPI, HTTPException, Query, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
     import uvicorn
 except ImportError as exc:  # pragma: no cover - optional dependency during import
     FastAPI = None  # type: ignore[assignment]
     HTTPException = None  # type: ignore[assignment]
+    Query = None  # type: ignore[assignment]
     Request = None  # type: ignore[assignment]
     CORSMiddleware = None  # type: ignore[assignment]
     FileResponse = None  # type: ignore[assignment]
@@ -459,46 +460,86 @@ def create_dashboard_app(
         allow_headers=["*"],
     )
 
+    def _collect_overviews() -> List[TaskOverview]:
+        with overviews_lock:
+            return collect_task_overviews(
+                config_path,
+                task=task,
+                artifact_dir_override=artifact_dir_override,
+            )
+
+    def _build_entries_payload(overview: TaskOverview) -> Dict[str, object]:
+        if not overview.state_file:
+            return {"entries": [], "task": overview.to_jsonable()}
+        if overview.parser_spec:
+            module = core._load_parser_module(overview.parser_spec)
+        else:
+            module = core._load_parser_module(None)
+        core._set_parser_module(module)
+        state = core.load_state(overview.state_file, core.classify_document_type)
+        jsonable = state.to_jsonable()
+        entries = jsonable.get("entries") if isinstance(jsonable, dict) else None
+        return {
+            "entries": entries if isinstance(entries, list) else [],
+            "task": overview.to_jsonable(),
+        }
+
     @app.get("/api/tasks")
     def get_tasks() -> JSONResponse:
         try:
-            with overviews_lock:
-                overviews = collect_task_overviews(
-                    config_path,
-                    task=task,
-                    artifact_dir_override=artifact_dir_override,
-                )
+            overviews = _collect_overviews()
             payload = [overview.to_jsonable() for overview in overviews]
             return JSONResponse(payload)
+        except Exception as exc:  # pragma: no cover - logged to client
+            return JSONResponse({"error": str(exc)}, status_code=500)
+
+    @app.get("/api/tasks/entries")
+    def get_tasks_entries(slugs: Optional[List[str]] = Query(None)) -> JSONResponse:
+        try:
+            overviews = _collect_overviews()
+            overview_map = {overview.slug: overview for overview in overviews}
+            if slugs:
+                requested: List[str] = []
+                seen = set()
+                for value in slugs:
+                    slug_value = "" if value is None else str(value).strip()
+                    if not slug_value or slug_value in seen:
+                        continue
+                    seen.add(slug_value)
+                    requested.append(slug_value)
+            else:
+                requested = [overview.slug for overview in overviews]
+            results: List[Dict[str, object]] = []
+            errors: List[Dict[str, str]] = []
+            for slug_value in requested:
+                overview = overview_map.get(slug_value)
+                if overview is None:
+                    errors.append({"slug": slug_value, "error": "Task not found"})
+                    continue
+                try:
+                    payload = _build_entries_payload(overview)
+                except Exception as exc:  # pragma: no cover - defensive branch
+                    errors.append({"slug": slug_value, "error": str(exc)})
+                    continue
+                payload["slug"] = slug_value
+                results.append(payload)
+            response_payload: Dict[str, object] = {"results": results}
+            if errors:
+                response_payload["errors"] = errors
+            return JSONResponse(response_payload)
+        except HTTPException:
+            raise
         except Exception as exc:  # pragma: no cover - logged to client
             return JSONResponse({"error": str(exc)}, status_code=500)
 
     @app.get("/api/tasks/{slug}/entries")
     def get_task_entries(slug: str) -> JSONResponse:
         try:
-            with overviews_lock:
-                overviews = collect_task_overviews(
-                    config_path,
-                    task=task,
-                    artifact_dir_override=artifact_dir_override,
-                )
+            overviews = _collect_overviews()
             overview = next((item for item in overviews if item.slug == slug), None)
             if overview is None:
                 raise HTTPException(status_code=404, detail="Task not found")
-            if not overview.state_file:
-                return JSONResponse({"entries": [], "task": overview.to_jsonable()})
-            if overview.parser_spec:
-                module = core._load_parser_module(overview.parser_spec)
-            else:
-                module = core._load_parser_module(None)
-            core._set_parser_module(module)
-            state = core.load_state(overview.state_file, core.classify_document_type)
-            jsonable = state.to_jsonable()
-            entries = jsonable.get("entries") if isinstance(jsonable, dict) else None
-            payload = {
-                "entries": entries if isinstance(entries, list) else [],
-                "task": overview.to_jsonable(),
-            }
+            payload = _build_entries_payload(overview)
             return JSONResponse(payload)
         except HTTPException:
             raise
