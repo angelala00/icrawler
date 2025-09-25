@@ -197,6 +197,39 @@ def test_entries_endpoint_returns_entries(tmp_path) -> None:
     assert payload["entries"][0]["title"] == "Entry 1"
 
 
+def test_bulk_entries_endpoint_returns_entries(tmp_path) -> None:
+    config_path, _, task_slug = _prepare_dashboard_environment(tmp_path)
+
+    app = create_dashboard_app(
+        str(config_path),
+        auto_refresh=30,
+        task=None,
+        artifact_dir_override=None,
+    )
+
+    bulk_route = _get_app_route(app, "/api/tasks/entries", "GET")
+    bulk_response = bulk_route.endpoint(slugs=[task_slug])
+    assert bulk_response.status_code == 200
+    payload = json.loads(bulk_response.body.decode("utf-8"))
+    assert "results" in payload
+    results = payload["results"]
+    assert isinstance(results, list)
+    assert results
+    first_result = results[0]
+    assert first_result["slug"] == task_slug
+    assert isinstance(first_result["entries"], list)
+    assert len(first_result["entries"]) == first_result["task"]["entries_total"]
+
+    error_response = bulk_route.endpoint(slugs=["unknown-task"])
+    assert error_response.status_code == 200
+    error_payload = json.loads(error_response.body.decode("utf-8"))
+    assert error_payload.get("results") == []
+    errors = error_payload.get("errors")
+    assert isinstance(errors, list)
+    assert errors[0]["slug"] == "unknown-task"
+    assert "Task not found" in errors[0]["error"]
+
+
 def test_entries_page_includes_search_config(tmp_path) -> None:
     config_path, _, _ = _prepare_dashboard_environment(tmp_path)
 
