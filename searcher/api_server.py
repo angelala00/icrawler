@@ -25,7 +25,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -36,12 +36,87 @@ from .clause_lookup import ClauseLookup
 from .policy_finder import (
     Entry,
     PolicyFinder,
+    TaskConfig,
+    TIAOFASI_ADMINISTRATIVE_REGULATION,
+    TIAOFASI_DEPARTMENTAL_RULE,
+    TIAOFASI_NATIONAL_LAW,
+    TIAOFASI_NORMATIVE_DOCUMENT,
+    ZHENGWUGONGKAI_ADMINISTRATIVE_NORMATIVE_DOCUMENTS,
+    ZHENGWUGONGKAI_CHINESE_REGULATIONS,
+    canonicalize_task_name,
     default_extract_path,
     default_state_path,
+    discover_project_root,
+    load_configured_tasks,
     parse_clause_reference,
+    resolve_configured_state_path,
 )
 
 LOGGER = logging.getLogger("searcher.api")
+
+
+_SEARCH_TASK_FLAG_DEFINITIONS = [
+    {
+        "name": ZHENGWUGONGKAI_ADMINISTRATIVE_NORMATIVE_DOCUMENTS,
+        "label": "zhengwugongkai_administrative_normative_documents",
+        "state_dest": "administrative_normative_documents",
+        "extract_dest": "administrative_normative_documents_extract",
+        "state_flags": [
+            "--zhengwugongkai-administrative-normative-documents",
+            "--policy-updates",
+        ],
+        "extract_flags": [
+            "--zhengwugongkai-administrative-normative-documents-extract",
+            "--policy-updates-extract",
+        ],
+    },
+    {
+        "name": ZHENGWUGONGKAI_CHINESE_REGULATIONS,
+        "label": "zhengwugongkai_chinese_regulations",
+        "state_dest": "chinese_regulations",
+        "extract_dest": "chinese_regulations_extract",
+        "state_flags": [
+            "--zhengwugongkai-chinese-regulations",
+            "--regulator-notice",
+        ],
+        "extract_flags": [
+            "--zhengwugongkai-chinese-regulations-extract",
+            "--regulator-notice-extract",
+        ],
+    },
+    {
+        "name": TIAOFASI_NATIONAL_LAW,
+        "label": "tiaofasi_national_law",
+        "state_dest": "tiaofasi_national_law",
+        "extract_dest": "tiaofasi_national_law_extract",
+        "state_flags": ["--tiaofasi-national-law"],
+        "extract_flags": ["--tiaofasi-national-law-extract"],
+    },
+    {
+        "name": TIAOFASI_ADMINISTRATIVE_REGULATION,
+        "label": "tiaofasi_administrative_regulation",
+        "state_dest": "tiaofasi_administrative_regulation",
+        "extract_dest": "tiaofasi_administrative_regulation_extract",
+        "state_flags": ["--tiaofasi-administrative-regulation"],
+        "extract_flags": ["--tiaofasi-administrative-regulation-extract"],
+    },
+    {
+        "name": TIAOFASI_DEPARTMENTAL_RULE,
+        "label": "tiaofasi_departmental_rule",
+        "state_dest": "tiaofasi_departmental_rule",
+        "extract_dest": "tiaofasi_departmental_rule_extract",
+        "state_flags": ["--tiaofasi-departmental-rule"],
+        "extract_flags": ["--tiaofasi-departmental-rule-extract"],
+    },
+    {
+        "name": TIAOFASI_NORMATIVE_DOCUMENT,
+        "label": "tiaofasi_normative_document",
+        "state_dest": "tiaofasi_normative_document",
+        "extract_dest": "tiaofasi_normative_document_extract",
+        "state_flags": ["--tiaofasi-normative-document"],
+        "extract_flags": ["--tiaofasi-normative-document-extract"],
+    },
+]
 
 
 def _coerce_topk(value: Any, default: int = 5, limit: int = 50) -> int:
@@ -95,6 +170,25 @@ def _resolve_json_path(value: Optional[str], fallback: Path) -> Path:
         if alt.exists():
             return alt
     return candidate
+
+
+def _parse_override_pairs(pairs: Optional[Sequence[str]]) -> Dict[str, str]:
+    overrides: Dict[str, str] = {}
+    if not pairs:
+        return overrides
+    for item in pairs:
+        if not isinstance(item, str):
+            continue
+        if "=" not in item:
+            LOGGER.warning("Ignoring malformed override %r (expected task=path)", item)
+            continue
+        key, value = item.split("=", 1)
+        canonical = canonicalize_task_name(key)
+        path_value = value.strip()
+        if not canonical or not path_value:
+            continue
+        overrides[canonical] = path_value
+    return overrides
 
 
 def _search_payload(
@@ -352,20 +446,75 @@ def parse_args(argv: Optional[Tuple[str, ...]] = None) -> argparse.Namespace:
     parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8001, help="Port to bind (default: 8001)")
     parser.add_argument(
+        "--config",
+        help="Optional config file used to discover tasks (defaults to pbc_config.json)",
+    )
+    parser.add_argument(
+        "--zhengwugongkai-administrative-normative-documents",
         "--policy-updates",
-        help="Path to policy_updates state JSON (defaults to autodiscovery)",
+        dest="administrative_normative_documents",
+        help=(
+            "Path to zhengwugongkai_administrative_normative_documents state JSON "
+            "(defaults to autodiscovery)"
+        ),
     )
     parser.add_argument(
+        "--zhengwugongkai-chinese-regulations",
         "--regulator-notice",
-        help="Path to regulator_notice state JSON (defaults to autodiscovery)",
+        dest="chinese_regulations",
+        help=(
+            "Path to zhengwugongkai_chinese_regulations state JSON "
+            "(defaults to autodiscovery)"
+        ),
     )
     parser.add_argument(
+        "--zhengwugongkai-administrative-normative-documents-extract",
         "--policy-updates-extract",
-        help="Path to policy_updates extract JSON (defaults to autodiscovery)",
+        dest="administrative_normative_documents_extract",
+        help=(
+            "Path to zhengwugongkai_administrative_normative_documents extract JSON "
+            "(defaults to autodiscovery)"
+        ),
     )
     parser.add_argument(
+        "--zhengwugongkai-chinese-regulations-extract",
         "--regulator-notice-extract",
-        help="Path to regulator_notice extract JSON (defaults to autodiscovery)",
+        dest="chinese_regulations_extract",
+        help=(
+            "Path to zhengwugongkai_chinese_regulations extract JSON "
+            "(defaults to autodiscovery)"
+        ),
+    )
+    for definition in _SEARCH_TASK_FLAG_DEFINITIONS[2:]:
+        parser.add_argument(
+            *definition["state_flags"],
+            dest=definition["state_dest"],
+            help=(
+                f"Path to {definition['label']} state JSON "
+                "(defaults to autodiscovery)"
+            ),
+        )
+        parser.add_argument(
+            *definition["extract_flags"],
+            dest=definition["extract_dest"],
+            help=(
+                f"Path to {definition['label']} extract JSON "
+                "(defaults to autodiscovery)"
+            ),
+        )
+    parser.add_argument(
+        "--state",
+        dest="state_overrides",
+        action="append",
+        metavar="TASK=PATH",
+        help="Override a task state JSON mapping (repeatable)",
+    )
+    parser.add_argument(
+        "--extract",
+        dest="extract_overrides",
+        action="append",
+        metavar="TASK=PATH",
+        help="Override a task extract JSON mapping (repeatable)",
     )
     return parser.parse_args(argv)
 
@@ -377,18 +526,63 @@ def main(argv: Optional[Tuple[str, ...]] = None) -> int:
         logging.basicConfig(level=logging.INFO)
 
     script_dir = Path(__file__).resolve().parent
-    default_policy_updates = default_state_path("policy_updates", script_dir)
-    default_regulator_notice = default_state_path("regulator_notice", script_dir)
-    default_policy_updates_extract = default_extract_path("policy_updates", script_dir)
-    default_regulator_notice_extract = default_extract_path("regulator_notice", script_dir)
+    project_root = discover_project_root(script_dir)
 
-    policy_updates_path = _resolve_json_path(args.policy_updates, default_policy_updates)
-    regulator_notice_path = _resolve_json_path(args.regulator_notice, default_regulator_notice)
-    policy_updates_extract_path = _resolve_json_path(args.policy_updates_extract, default_policy_updates_extract)
-    regulator_notice_extract_path = _resolve_json_path(args.regulator_notice_extract, default_regulator_notice_extract)
+    if args.config:
+        config_path = Path(args.config).expanduser()
+        if not config_path.is_absolute():
+            config_path = (Path.cwd() / config_path).resolve()
+    else:
+        config_path = project_root / "pbc_config.json"
 
-    finder = PolicyFinder(str(policy_updates_path), str(regulator_notice_path))
-    clause_lookup = ClauseLookup([policy_updates_extract_path, regulator_notice_extract_path])
+    config_dir = config_path.parent.resolve() if config_path else project_root
+
+    task_configs = load_configured_tasks(config_path if config_path.exists() else None)
+    task_map = {task.name: task for task in task_configs}
+
+    state_overrides = _parse_override_pairs(args.state_overrides)
+    extract_overrides = _parse_override_pairs(args.extract_overrides)
+
+    for definition in _SEARCH_TASK_FLAG_DEFINITIONS:
+        state_value = getattr(args, definition["state_dest"], None)
+        if state_value:
+            state_overrides[canonicalize_task_name(definition["name"])] = state_value
+        extract_value = getattr(args, definition["extract_dest"], None)
+        if extract_value:
+            extract_overrides[canonicalize_task_name(definition["name"])] = extract_value
+
+    override_names = set(state_overrides.keys()) | set(extract_overrides.keys())
+    for name in override_names:
+        if name not in task_map:
+            new_task = TaskConfig(name)
+            task_configs.append(new_task)
+            task_map[name] = new_task
+
+    resolved_state_paths: List[Path] = []
+    missing_state_paths: List[str] = []
+    for task in task_configs:
+        fallback_state = resolve_configured_state_path(task, config_dir) or default_state_path(
+            task.name, script_dir
+        )
+        resolved_state = _resolve_json_path(state_overrides.get(task.name), fallback_state)
+        resolved_state_paths.append(resolved_state)
+        if not resolved_state.exists():
+            missing_state_paths.append(str(resolved_state))
+
+    if missing_state_paths:
+        LOGGER.error("Missing search state file(s): %s", ", ".join(missing_state_paths))
+        return 1
+
+    resolved_extract_paths: List[Path] = []
+    for task in task_configs:
+        fallback_extract = default_extract_path(task.name, script_dir)
+        resolved_extract = _resolve_json_path(
+            extract_overrides.get(task.name), fallback_extract
+        )
+        resolved_extract_paths.append(resolved_extract)
+
+    finder = PolicyFinder(*(str(path) for path in resolved_state_paths))
+    clause_lookup = ClauseLookup(resolved_extract_paths)
 
     app = create_app(finder, clause_lookup)
     host = args.host

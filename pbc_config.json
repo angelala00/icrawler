@@ -5,12 +5,12 @@
   "timeout": 30,
   "tasks": [
     {
-      "name": "regulator_notice",
+      "name": "zhengwugongkai_chinese_regulations",
       "start_url": "http://www.pbc.gov.cn/zhengwugongkai/4081330/4406346/4406348/index.html",
       "parser": "icrawler.parser"
     },
     {
-      "name": "policy_updates",
+      "name": "zhengwugongkai_administrative_normative_documents",
       "start_url": "http://www.pbc.gov.cn/zhengwugongkai/4081330/4406346/4693545/index.html",
       "parser": "icrawler.parser_policy"
     },
