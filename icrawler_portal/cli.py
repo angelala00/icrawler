@@ -6,7 +6,7 @@ import socket
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import icrawler.dashboard as base_dashboard
 from icrawler.dashboard import (
@@ -14,7 +14,22 @@ from icrawler.dashboard import (
     create_dashboard_app,
     render_dashboard_html,
 )
-from searcher.policy_finder import Entry, PolicyFinder, default_state_path
+from searcher.policy_finder import (
+    Entry,
+    PolicyFinder,
+    TaskConfig,
+    TIAOFASI_ADMINISTRATIVE_REGULATION,
+    TIAOFASI_DEPARTMENTAL_RULE,
+    TIAOFASI_NATIONAL_LAW,
+    TIAOFASI_NORMATIVE_DOCUMENT,
+    ZHENGWUGONGKAI_ADMINISTRATIVE_NORMATIVE_DOCUMENTS,
+    ZHENGWUGONGKAI_CHINESE_REGULATIONS,
+    canonicalize_task_name,
+    default_state_path,
+    discover_project_root,
+    load_configured_tasks,
+    resolve_configured_state_path,
+)
 
 DEFAULT_SEARCH_TOPK = 5
 MAX_SEARCH_TOPK = 50
@@ -25,12 +40,60 @@ uvicorn = base_dashboard.uvicorn
 _FASTAPI_IMPORT_ERROR = base_dashboard._FASTAPI_IMPORT_ERROR
 
 
-def _resolve_state_path(task_name: str, override: Optional[str]) -> Path:
+_SEARCH_TASK_DEFINITIONS = [
+    {
+        "name": ZHENGWUGONGKAI_ADMINISTRATIVE_NORMATIVE_DOCUMENTS,
+        "dest": "search_administrative_normative_documents",
+        "flags": [
+            "--search-zhengwugongkai-administrative-normative-documents",
+            "--search-policy-updates",
+        ],
+    },
+    {
+        "name": ZHENGWUGONGKAI_CHINESE_REGULATIONS,
+        "dest": "search_chinese_regulations",
+        "flags": [
+            "--search-zhengwugongkai-chinese-regulations",
+            "--search-regulator-notice",
+        ],
+    },
+    {
+        "name": TIAOFASI_NATIONAL_LAW,
+        "dest": "search_tiaofasi_national_law",
+        "flags": ["--search-tiaofasi-national-law"],
+    },
+    {
+        "name": TIAOFASI_ADMINISTRATIVE_REGULATION,
+        "dest": "search_tiaofasi_administrative_regulation",
+        "flags": ["--search-tiaofasi-administrative-regulation"],
+    },
+    {
+        "name": TIAOFASI_DEPARTMENTAL_RULE,
+        "dest": "search_tiaofasi_departmental_rule",
+        "flags": ["--search-tiaofasi-departmental-rule"],
+    },
+    {
+        "name": TIAOFASI_NORMATIVE_DOCUMENT,
+        "dest": "search_tiaofasi_normative_document",
+        "flags": ["--search-tiaofasi-normative-document"],
+    },
+]
+
+
+def _resolve_state_path(
+    task_name: str,
+    override: Optional[str],
+    task_config: Optional[TaskConfig],
+    config_dir: Optional[Path],
+) -> Path:
     script_dir = Path(__file__).resolve().parent
     if override:
         candidate = Path(override).expanduser()
     else:
-        candidate = default_state_path(task_name, script_dir)
+        configured: Optional[Path] = None
+        if task_config is not None:
+            configured = resolve_configured_state_path(task_config, config_dir)
+        candidate = configured or default_state_path(task_name, script_dir)
     if not candidate.exists():
         alternative = Path("/mnt/data") / candidate.name
         if alternative.exists():
@@ -38,32 +101,66 @@ def _resolve_state_path(task_name: str, override: Optional[str]) -> Path:
     return candidate
 
 
+def _parse_override_pairs(values: Optional[Sequence[str]]) -> Dict[str, str]:
+    overrides: Dict[str, str] = {}
+    if not values:
+        return overrides
+    for item in values:
+        if not isinstance(item, str) or "=" not in item:
+            continue
+        key, value = item.split("=", 1)
+        canonical = canonicalize_task_name(key)
+        path_value = value.strip()
+        if canonical and path_value:
+            overrides[canonical] = path_value
+    return overrides
+
+
 def _prepare_policy_finder(
     *,
+    config_path: str,
     disable_search: bool,
-    policy_updates_path: Optional[str],
-    regulator_notice_path: Optional[str],
+    state_overrides: Dict[str, str],
 ) -> Tuple[Optional[PolicyFinder], Optional[str]]:
     if disable_search:
         return None, "Search disabled by configuration"
 
-    resolved_policy_updates = _resolve_state_path("policy_updates", policy_updates_path)
-    resolved_regulator_notice = _resolve_state_path(
-        "regulator_notice", regulator_notice_path
-    )
+    overrides = dict(state_overrides)
 
+    config_file = Path(config_path).expanduser()
+    if not config_file.is_absolute():
+        project_root = discover_project_root(Path(__file__).resolve().parent)
+        config_file = (project_root / config_file).resolve()
+
+    config_dir = config_file.parent.resolve()
+
+    task_configs = load_configured_tasks(config_file if config_file.exists() else None)
+    task_map = {task.name: task for task in task_configs}
+
+    for name, override in list(overrides.items()):
+        canonical = canonicalize_task_name(name)
+        if canonical != name:
+            overrides[canonical] = override
+            del overrides[name]
+        if canonical not in task_map:
+            new_task = TaskConfig(canonical)
+            task_configs.append(new_task)
+            task_map[canonical] = new_task
+
+    resolved_paths: List[Path] = []
     missing: List[str] = []
-    for resolved in (resolved_policy_updates, resolved_regulator_notice):
+    for task in task_configs:
+        override = overrides.get(task.name)
+        resolved = _resolve_state_path(task.name, override, task_map.get(task.name), config_dir)
+        resolved_paths.append(resolved)
         if not resolved.exists():
             missing.append(str(resolved))
+
     if missing:
         return None, "Missing search state file(s): " + ", ".join(missing)
 
     try:
-        finder = PolicyFinder(
-            str(resolved_policy_updates),
-            str(resolved_regulator_notice),
-        )
+        finder = PolicyFinder(*(str(path) for path in resolved_paths))
     except Exception as exc:  # pragma: no cover - defensive
         return None, f"Failed to load search index: {exc}"
 
@@ -317,13 +414,20 @@ def main(argv: Optional[List[str]] = None) -> None:
         action="store_true",
         help="Disable the policy search interface",
     )
+    for definition in _SEARCH_TASK_DEFINITIONS:
+        parser.add_argument(
+            *definition["flags"],
+            dest=definition["dest"],
+            help=(
+                f"Path to the {definition['name']} state JSON for the search interface"
+            ),
+        )
     parser.add_argument(
-        "--search-policy-updates",
-        help="Path to the policy_updates state JSON for the search interface",
-    )
-    parser.add_argument(
-        "--search-regulator-notice",
-        help="Path to the regulator_notice state JSON for the search interface",
+        "--search-state",
+        dest="search_state_overrides",
+        action="append",
+        metavar="TASK=PATH",
+        help="Override a search state JSON mapping (repeatable)",
     )
     parser.add_argument(
         "--search-default-topk",
@@ -381,10 +485,18 @@ def main(argv: Optional[List[str]] = None) -> None:
     if search_default_topk > search_max_topk:
         search_default_topk = min(search_default_topk, search_max_topk)
 
+    search_state_overrides = _parse_override_pairs(args.search_state_overrides)
+    for definition in _SEARCH_TASK_DEFINITIONS:
+        override_value = getattr(args, definition["dest"], None)
+        if override_value:
+            search_state_overrides[
+                canonicalize_task_name(definition["name"])
+            ] = override_value
+
     policy_finder, search_error = _prepare_policy_finder(
+        config_path=config_path,
         disable_search=args.disable_search,
-        policy_updates_path=args.search_policy_updates,
-        regulator_notice_path=args.search_regulator_notice,
+        state_overrides=search_state_overrides,
     )
     if search_error and not args.disable_search:
         print(f"[portal] Search interface disabled: {search_error}", file=sys.stderr)

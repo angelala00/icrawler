@@ -3,7 +3,8 @@
 """
 policy_finder.py (improved scoring)
 Usage:
-    python policy_finder.py "<query>" [policy_updates.json] [regulator_notice.json]
+    python policy_finder.py "<query>" [zhengwugongkai_administrative_normative_documents.json]
+    [zhengwugongkai_chinese_regulations.json]
 """
 
 from __future__ import annotations
@@ -20,6 +21,32 @@ from zipfile import ZipFile
 import xml.etree.ElementTree as ET
 
 from bs4 import BeautifulSoup
+
+
+ZHENGWUGONGKAI_ADMINISTRATIVE_NORMATIVE_DOCUMENTS = (
+    "zhengwugongkai_administrative_normative_documents"
+)
+ZHENGWUGONGKAI_CHINESE_REGULATIONS = "zhengwugongkai_chinese_regulations"
+TIAOFASI_NATIONAL_LAW = "tiaofasi_national_law"
+TIAOFASI_ADMINISTRATIVE_REGULATION = "tiaofasi_administrative_regulation"
+TIAOFASI_DEPARTMENTAL_RULE = "tiaofasi_departmental_rule"
+TIAOFASI_NORMATIVE_DOCUMENT = "tiaofasi_normative_document"
+
+DEFAULT_SEARCH_TASKS = [
+    ZHENGWUGONGKAI_ADMINISTRATIVE_NORMATIVE_DOCUMENTS,
+    ZHENGWUGONGKAI_CHINESE_REGULATIONS,
+    TIAOFASI_NATIONAL_LAW,
+    TIAOFASI_ADMINISTRATIVE_REGULATION,
+    TIAOFASI_DEPARTMENTAL_RULE,
+    TIAOFASI_NORMATIVE_DOCUMENT,
+]
+
+def canonicalize_task_name(task_name: str) -> str:
+    """Return the canonical task identifier for ``task_name``."""
+
+    normalized = (task_name or "").strip().lower().replace(" ", "_")
+    normalized = normalized.replace("-", "_")
+    return normalized
 
 try:  # Optional dependency used for PDF extraction
     from pdfminer.high_level import extract_text as _pdf_extract_text
@@ -284,6 +311,58 @@ def resolve_artifact_dir(project_root: Path) -> Path:
                 candidate = (project_root / candidate).resolve()
             return candidate
     return (project_root / "artifacts").resolve()
+
+
+@dataclass
+class TaskConfig:
+    name: str
+    state_file: Optional[str] = None
+
+
+def load_configured_tasks(config_path: Optional[Path]) -> List[TaskConfig]:
+    """Load configured tasks or fall back to ``DEFAULT_SEARCH_TASKS``."""
+
+    tasks: List[TaskConfig] = []
+    seen: List[str] = []
+    path = Path(config_path) if config_path else None
+    if path and path.exists():
+        try:
+            data = json.loads(path.read_text("utf-8"))
+        except Exception:
+            data = {}
+        configured = data.get("tasks")
+        if isinstance(configured, list):
+            for item in configured:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("name")
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                canonical = canonicalize_task_name(name)
+                if canonical in seen:
+                    continue
+                seen.append(canonical)
+                state_file = item.get("state_file")
+                if isinstance(state_file, str) and state_file.strip():
+                    tasks.append(TaskConfig(canonical, state_file.strip()))
+                else:
+                    tasks.append(TaskConfig(canonical))
+    if not tasks:
+        tasks = [TaskConfig(name) for name in DEFAULT_SEARCH_TASKS]
+    return tasks
+
+
+def resolve_configured_state_path(
+    task: TaskConfig, config_dir: Optional[Path]
+) -> Optional[Path]:
+    """Resolve a configured state path if present for ``task``."""
+
+    if task.state_file:
+        candidate = Path(task.state_file).expanduser()
+        if not candidate.is_absolute() and config_dir is not None:
+            candidate = (config_dir / candidate).resolve()
+        return candidate
+    return None
 
 
 def default_state_path(task_name: str, start: Optional[Path] = None) -> Path:
@@ -1000,16 +1079,33 @@ def fuzzy_score(query: str, e: Entry) -> float:
 
     return score
 
+def _flatten_paths(paths: Iterable[Any]) -> List[str]:
+    normalized: List[str] = []
+    for item in paths:
+        if not item:
+            continue
+        if isinstance(item, (list, tuple, set)):
+            normalized.extend(_flatten_paths(item))
+        else:
+            normalized.append(str(item))
+    return normalized
+
+
 class PolicyFinder:
-    def __init__(self, json_path_a: str, json_path_b: str):
+    def __init__(self, *json_paths: Any):
         self.entries: List[Entry] = []
         self.idx_loaded = False
-        self.load(json_path_a, json_path_b)
+        if json_paths:
+            self.load(*json_paths)
 
-    def load(self, a: str, b: str):
-        ea = load_entries(a)
-        eb = load_entries(b)
-        self.entries = ea + eb
+    def load(self, *json_paths: Any):
+        paths = _flatten_paths(json_paths)
+        if not paths:
+            raise ValueError("At least one JSON state path is required")
+        entries: List[Entry] = []
+        for path in paths:
+            entries.extend(load_entries(path))
+        self.entries = entries
         self.idx_loaded = True
 
     def search(self, query: str, topk: int = 1) -> List[Tuple[Entry, float]]:
@@ -1026,23 +1122,34 @@ class PolicyFinder:
 
 def main(argv: List[str]):
     if len(argv) < 2:
-        print("Usage: python policy_finder.py \"<query>\" [policy_updates.json] [regulator_notice.json]")
+        print(
+            "Usage: python policy_finder.py \"<query>\" [state.json ...]"
+        )
         return 1
     query = argv[1]
     script_dir = Path(__file__).resolve().parent
 
-    default_a = default_state_path("policy_updates", script_dir)
-    default_b = default_state_path("regulator_notice", script_dir)
+    default_paths = [
+        default_state_path(task_name, script_dir) for task_name in DEFAULT_SEARCH_TASKS
+    ]
 
-    a = Path(argv[2]).expanduser() if len(argv) >= 3 else default_a
-    b = Path(argv[3]).expanduser() if len(argv) >= 4 else default_b
+    if len(argv) >= 3:
+        candidate_paths = [Path(arg).expanduser() for arg in argv[2:]]
+    else:
+        candidate_paths = default_paths
 
-    if not a.exists() and (Path('/mnt/data')/a.name).exists():
-        a = Path('/mnt/data')/a.name
-    if not b.exists() and (Path('/mnt/data')/b.name).exists():
-        b = Path('/mnt/data')/b.name
+    resolved_paths: List[Path] = []
+    for candidate in candidate_paths:
+        if candidate.exists():
+            resolved_paths.append(candidate)
+            continue
+        fallback = Path("/mnt/data") / candidate.name
+        if fallback.exists():
+            resolved_paths.append(fallback)
+        else:
+            resolved_paths.append(candidate)
 
-    finder = PolicyFinder(str(a), str(b))
+    finder = PolicyFinder(*(str(path) for path in resolved_paths))
     results = finder.search(query, topk=1)
     if not results or not results[0][0].best_path:
         print("NOT_FOUND")

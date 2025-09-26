@@ -22,9 +22,10 @@ every 30 seconds. Useful options:
   data that is displayed.
 - `--refresh` controls the auto-refresh interval (set `0` to disable).
 - `--disable-search` turns off the policy finder UI entirely.
-- `--search-policy-updates` / `--search-regulator-notice` let you point the
-  search index at explicit `state.json` paths when auto-discovery is not
-  sufficient.
+- `--search-state task=/path/state.json` (repeatable) lets you point the search
+  index at explicit state files when auto-discovery is not sufficient. Per-task
+  flags such as `--search-zhengwugongkai-chinese-regulations` remain available
+  for compatibility.
 - `--search-default-topk` and `--search-max-topk` adjust the default/maximum
   result counts returned from the `/api/search` endpoint and the UI.
 - `--once` renders the HTML snapshot once and exits; `--json` dumps the current
@@ -54,7 +55,7 @@ supported). Minimal example:
   "artifact_dir": "artifacts",
   "tasks": [
     {
-      "name": "policy_updates",
+      "name": "zhengwugongkai_administrative_normative_documents",
       "start_url": "http://www.pbc.gov.cn/.../index.html",
       "parser": "icrawler.parser_policy"
     }
@@ -166,9 +167,12 @@ with:
 python -m searcher.api_server --host 0.0.0.0 --port 8001
 ```
 
-By default the server automatically locates `policy_updates` and
-`regulator_notice` state files using the same rules as the CLI utility. Pass
-`--policy-updates` / `--regulator-notice` to override the discovery.
+By default the server automatically locates every task defined in
+`pbc_config.json` (for example the six zhengwugongkai/tiaofasi monitors) using
+the same rules as the CLI utility. Pass `--state task=/path/state.json` or the
+per-task flags such as `--zhengwugongkai-chinese-regulations` (legacy aliases
+`--policy-updates` / `--regulator-notice` are still accepted) to override the
+discovery when needed.
 
 Send either a GET or POST request to `/search` to run a query. Example GET
 request:

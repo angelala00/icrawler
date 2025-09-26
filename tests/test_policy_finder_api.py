@@ -2,6 +2,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from typing import Dict
 
 import pytest
 from fastapi.responses import JSONResponse
@@ -12,7 +13,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from searcher.api_server import create_app  # noqa: E402
-from searcher.policy_finder import PolicyFinder  # noqa: E402
+from searcher.clause_lookup import ClauseLookup  # noqa: E402
+from searcher.policy_finder import DEFAULT_SEARCH_TASKS, PolicyFinder  # noqa: E402
 
 
 @pytest.fixture
@@ -32,35 +34,122 @@ def sample_state_files(tmp_path):
         """.strip(),
         "utf-8",
     )
-    policy_updates = {
+
+    state_payloads = {
+        "zhengwugongkai_administrative_normative_documents": {
+            "entries": [
+                {
+                    "serial": 1,
+                    "title": "中国人民银行公告〔2023〕第3号 关于测试",
+                    "remark": "测试备注",
+                    "documents": [
+                        {"type": "html", "local_path": str(policy_html)},
+                    ],
+                }
+            ]
+        },
+        "zhengwugongkai_chinese_regulations": {
+            "entries": [
+                {
+                    "serial": 2,
+                    "title": "监管问答 2021 年度总结",
+                    "remark": "年度总结",
+                    "documents": [
+                        {"type": "pdf", "local_path": "/tmp/notice.pdf"},
+                    ],
+                }
+            ]
+        },
+        "tiaofasi_national_law": {
+            "entries": [
+                {
+                    "serial": 3,
+                    "title": "国家法律 金融稳定法（草案）",
+                    "remark": "国家法律草案",
+                    "documents": [
+                        {"type": "pdf", "local_path": "/tmp/national_law.pdf"},
+                    ],
+                }
+            ]
+        },
+        "tiaofasi_administrative_regulation": {
+            "entries": [
+                {
+                    "serial": 4,
+                    "title": "行政法规 支付清算管理条例",
+                    "remark": "行政法规",
+                    "documents": [
+                        {"type": "pdf", "local_path": "/tmp/admin_reg.pdf"},
+                    ],
+                }
+            ]
+        },
+        "tiaofasi_departmental_rule": {
+            "entries": [
+                {
+                    "serial": 5,
+                    "title": "部门规章 金融控股公司监督管理办法",
+                    "remark": "部门规章",
+                    "documents": [
+                        {"type": "pdf", "local_path": "/tmp/dept_rule.pdf"},
+                    ],
+                }
+            ]
+        },
+        "tiaofasi_normative_document": {
+            "entries": [
+                {
+                    "serial": 6,
+                    "title": "规范性文件 金融科技创新指导意见",
+                    "remark": "规范性文件",
+                    "documents": [
+                        {"type": "pdf", "local_path": "/tmp/norm_doc.pdf"},
+                    ],
+                }
+            ]
+        },
+    }
+
+    state_paths: Dict[str, Path] = {}
+    for task_name, payload in state_payloads.items():
+        path = tmp_path / f"{task_name}.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), "utf-8")
+        state_paths[task_name] = path
+
+    policy_extract = {
         "entries": [
             {
-                "serial": 1,
-                "title": "中国人民银行公告〔2023〕第3号 关于测试",
-                "remark": "测试备注",
-                "documents": [
-                    {"type": "html", "local_path": str(policy_html)},
-                ],
+                "entry": state_payloads[
+                    "zhengwugongkai_administrative_normative_documents"
+                ]["entries"][0],
+                "text_path": str(policy_html),
             }
         ]
     }
-    regulator_notice = {
+    notice_extract = {
         "entries": [
             {
-                "serial": 2,
-                "title": "监管问答 2021 年度总结",
-                "remark": "年度总结",
-                "documents": [
-                    {"type": "pdf", "local_path": "/tmp/notice.pdf"},
-                ],
+                "entry": state_payloads["zhengwugongkai_chinese_regulations"][
+                    "entries"
+                ][0],
             }
         ]
     }
-    policy_path = tmp_path / "policy_updates.json"
-    notice_path = tmp_path / "regulator_notice.json"
-    policy_path.write_text(json.dumps(policy_updates, ensure_ascii=False), "utf-8")
-    notice_path.write_text(json.dumps(regulator_notice, ensure_ascii=False), "utf-8")
-    return policy_path, notice_path
+    policy_extract_path = (
+        tmp_path / "zhengwugongkai_administrative_normative_documents_extract.json"
+    )
+    notice_extract_path = tmp_path / "zhengwugongkai_chinese_regulations_extract.json"
+    policy_extract_path.write_text(
+        json.dumps(policy_extract, ensure_ascii=False), "utf-8"
+    )
+    notice_extract_path.write_text(
+        json.dumps(notice_extract, ensure_ascii=False), "utf-8"
+    )
+    extract_paths = {
+        "zhengwugongkai_administrative_normative_documents": policy_extract_path,
+        "zhengwugongkai_chinese_regulations": notice_extract_path,
+    }
+    return state_paths, extract_paths
 
 
 def _get_route(app, path: str, method: str):
@@ -83,9 +172,13 @@ class _SimpleRequest:
 
 @pytest.fixture
 def policy_api(sample_state_files):
-    policy_path, notice_path = sample_state_files
-    finder = PolicyFinder(str(policy_path), str(notice_path))
-    app = create_app(finder)
+    state_paths, extract_paths = sample_state_files
+    ordered_state_paths = [
+        str(state_paths[name]) for name in DEFAULT_SEARCH_TASKS if name in state_paths
+    ]
+    finder = PolicyFinder(*ordered_state_paths)
+    lookup = ClauseLookup(list(extract_paths.values()))
+    app = create_app(finder, lookup)
     get_route = _get_route(app, "/search", "GET")
     post_route = _get_route(app, "/search", "POST")
     return finder, get_route, post_route
@@ -93,6 +186,7 @@ def policy_api(sample_state_files):
 
 def test_get_search_endpoint(policy_api):
     finder, get_route, _ = policy_api
+    assert len(finder.entries) == len(DEFAULT_SEARCH_TASKS)
     response = get_route.endpoint(
         query="人民银行公告",
         q=None,
@@ -110,6 +204,24 @@ def test_get_search_endpoint(policy_api):
     assert result["title"].startswith("中国人民银行公告")
     assert "documents" in result
     assert result["score"] > 0
+
+
+def test_search_covers_additional_tasks(policy_api):
+    finder, get_route, _ = policy_api
+    response = get_route.endpoint(
+        query="金融稳定法",
+        q=None,
+        topk="3",
+        include_documents=None,
+        documents=None,
+        finder_instance=finder,
+    )
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    payload = json.loads(response.body.decode("utf-8"))
+    assert payload["result_count"] >= 1
+    titles = [result["title"] for result in payload["results"]]
+    assert any("金融稳定法" in title for title in titles)
 
 
 def test_get_search_includes_clause(policy_api):
