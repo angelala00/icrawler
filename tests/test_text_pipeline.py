@@ -128,10 +128,15 @@ def test_extract_entry_normalizes_html_text(tmp_path):
 <html>
   <body>
     <div>中国人民银行规章</div>
+    <div>所在位置 ：</div>
+    <div>政府信息公开</div>
+    <div>政　　策</div>
+    <div>行政规范性文件</div>
     <div>下载word版</div>
     <div>下载pdf版</div>
     <h1>制度标题</h1>
     <p>第一段内容。</p>
+    <p>法律声明</p>
     <p>中国人民银行发布</p>
   </body>
 </html>
@@ -156,6 +161,8 @@ def test_extract_entry_normalizes_html_text(tmp_path):
     assert text.splitlines()[0] == "制度标题"
     assert "下载word版" not in text
     assert "中国人民银行规章" not in text
+    assert "所在位置" not in text
+    assert "法律声明" not in text
     assert not text.endswith("中国人民银行发布")
 
 

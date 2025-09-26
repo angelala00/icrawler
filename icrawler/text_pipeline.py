@@ -90,7 +90,24 @@ _HTML_REMOVE_LINES = {
     "中国人民银行规章",
     "中国人民银行发布",
     "打印本页",
+    ">",
+    "|",
 }
+_HTML_REMOVE_CONTAINS = (
+    "所在位置",
+    "政府信息公开",
+    "政　　策",
+    "行政规范性文件",
+    "法律声明",
+    "联系我们",
+    "加入收藏",
+    "网站地图",
+    "最佳分辨率",
+    "京公网安备",
+    "京ICP备",
+    "网站标识码",
+    "网站主办单位",
+)
 
 
 def set_pdf_text_extractor(extractor):  # pragma: no cover - exercised in tests
@@ -276,6 +293,10 @@ def _normalize_html_text(text: str) -> str:
         if line in _HTML_REMOVE_LINES:
             continue
         if "下载" in line and ("word" in lower or "pdf" in lower):
+            continue
+        if any(token in line for token in _HTML_REMOVE_CONTAINS):
+            continue
+        if line.endswith(".pdf"):
             continue
 
         if blank_pending:
