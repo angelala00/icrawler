@@ -113,9 +113,7 @@ def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
     record_one = records_by_serial[1]
     assert record_one.source_type == "docx"
     content_one = record_one.text_path.read_text(encoding="utf-8")
-    assert "制度名称: 制度一" in content_one
-    assert "提取状态: success" in content_one
-    assert "Word 文本内容" in content_one
+    assert content_one == "Word 文本内容"
 
     entry_one_docs = [doc for doc in state_data["entries"][0]["documents"] if doc.get("type") == "text"]
     assert len(entry_one_docs) == 1
@@ -126,7 +124,7 @@ def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
     assert record_two.status == "success"
     assert not record_two.pdf_needs_ocr
     content_two = record_two.text_path.read_text(encoding="utf-8")
-    assert "PDF 正文内容" in content_two
+    assert content_two == "PDF 正文内容"
 
     entry_two_text_doc = [doc for doc in state_data["entries"][1]["documents"] if doc.get("type") == "text"]
     assert entry_two_text_doc[0].get("needs_ocr") is None
@@ -137,7 +135,7 @@ def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
     assert record_three.status == "success"
     assert record_three.pdf_needs_ocr
     content_three = record_three.text_path.read_text(encoding="utf-8")
-    assert "HTML 正文" in content_three
+    assert content_three == "HTML 正文"
 
     entry_three_text_doc = [doc for doc in state_data["entries"][2]["documents"] if doc.get("type") == "text"]
     assert entry_three_text_doc[0]["needs_ocr"] is True
@@ -152,7 +150,7 @@ def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
     assert record_four.source_type is None
     assert record_four.status == "no_source"
     content_four = record_four.text_path.read_text(encoding="utf-8")
-    assert "[未提取到文本内容]" in content_four
+    assert content_four == ""
 
     entry_four_docs = [doc for doc in state_data["entries"][3]["documents"] if doc.get("type") == "text"]
     assert entry_four_docs[0]["extraction_status"] == "no_source"
