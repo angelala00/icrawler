@@ -16,8 +16,31 @@
       </p>
     </header>
     <main>
-      <section class="summary" id="summary"></section>
-      <section class="task-filters" id="task-filters">
+      <section class="summary" id="summary">
+        <div class="summary__cards" id="summary-cards"></div>
+        <button
+          type="button"
+          class="summary__toggle"
+          id="task-filter-toggle"
+          aria-expanded="false"
+          aria-controls="task-filters"
+        >
+          <span class="summary__toggle-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="presentation" focusable="false">
+              <path
+                d="M4 5h16l-5.5 7v6l-5 3v-9z"
+                fill="none"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              ></path>
+            </svg>
+            <span class="summary__toggle-chevron">⌄</span>
+          </span>
+          <span class="sr-only" id="task-filter-toggle-text">展开任务筛选</span>
+        </button>
+      </section>
+      <section class="task-filters hidden" id="task-filters">
         <div class="task-filters__header">
           <h2>任务筛选</h2>
           <p>按状态或关键字快速定位需要关注的任务。</p>

@@ -8,7 +8,7 @@
     ? config.initialData
     : null;
 
-  const summaryEl = document.getElementById("summary");
+  const summaryCardsEl = document.getElementById("summary-cards");
   const tableBody = document.getElementById("tasks-body");
   const messageEl = document.getElementById("status-message");
   const generatedAtEls = document.querySelectorAll("[data-generated-at]");
@@ -18,12 +18,16 @@
   const filterQueryInput = document.getElementById("task-filter-query");
   const filterStatusSelect = document.getElementById("task-filter-status");
   const filterStatusText = document.getElementById("task-filter-status-text");
+  const filterToggleButton = document.getElementById("task-filter-toggle");
+  const filterToggleText = document.getElementById("task-filter-toggle-text");
 
   let currentData = null;
   const taskFilters = {
     query: "",
     status: "all",
   };
+
+  let filtersExpanded = false;
 
   function buildUrl(base, path) {
     if (!base) {
@@ -149,6 +153,25 @@
     }
   }
 
+  function setFiltersExpanded(expanded) {
+    filtersExpanded = Boolean(expanded);
+    if (filtersSection) {
+      filtersSection.classList.toggle("hidden", !filtersExpanded);
+    }
+    if (filterToggleButton) {
+      filterToggleButton.setAttribute(
+        "aria-expanded",
+        filtersExpanded ? "true" : "false"
+      );
+      filterToggleButton.classList.toggle("is-expanded", filtersExpanded);
+    }
+    if (filterToggleText) {
+      filterToggleText.textContent = filtersExpanded
+        ? "收起任务筛选"
+        : "展开任务筛选";
+    }
+  }
+
   function renderFilteredTasks() {
     const data = Array.isArray(currentData) ? currentData : [];
     const totalCount = data.length;
@@ -167,7 +190,19 @@
     if (!filtersSection) {
       return;
     }
+    setFiltersExpanded(false);
+
     updateFilterStatus(0, 0);
+
+    if (filterToggleButton) {
+      filterToggleButton.addEventListener("click", () => {
+        const nextState = !filtersExpanded;
+        setFiltersExpanded(nextState);
+        if (nextState && filterQueryInput) {
+          filterQueryInput.focus();
+        }
+      });
+    }
 
     if (filterQueryInput) {
       filterQueryInput.addEventListener("input", () => {
@@ -216,7 +251,7 @@
   }
 
   function renderSummary(tasks) {
-    if (!summaryEl) {
+    if (!summaryCardsEl) {
       return;
     }
     const totals = tasks.reduce(
@@ -247,7 +282,7 @@
       )
       .join("");
 
-    summaryEl.innerHTML = cards;
+    summaryCardsEl.innerHTML = cards;
   }
 
   function setTableState(message, className) {
