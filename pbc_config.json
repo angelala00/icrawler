@@ -13,6 +13,11 @@
       "name": "policy_updates",
       "start_url": "http://www.pbc.gov.cn/zhengwugongkai/4081330/4406346/4693545/index.html",
       "parser": "icrawler.parser_policy"
+    },
+    {
+      "name": "tiaofasi_notice",
+      "start_url": "http://www.pbc.gov.cn/tiaofasi/144941/144951/index.html",
+      "parser": "icrawler.parser_tiaofasi"
     }
   ]
 }
