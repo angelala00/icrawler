@@ -324,14 +324,18 @@ def main() -> None:  # pragma: no cover - exercised via integration tests
             print(f"跳过任务 {plan.display_name}：state 文件不存在 ({state_path})")
             continue
 
-        output_state_path = _default_output_state_path(state_path)
+        default_state_name = _default_output_state_path(state_path).name
+        output_state_path = output_dir / default_state_name
 
+        default_summary_name = f"{slug}_extract.json"
         if summary_root is None:
-            summary_path = base_extract_dir / f"extract_{slug}.json"
+            summary_path = base_extract_dir / default_summary_name
         elif summary_root.suffix:
-            summary_path = summary_root.with_name(f"{summary_root.stem}_{slug}{summary_root.suffix}")
+            summary_path = summary_root.with_name(
+                f"{summary_root.stem}_{slug}{summary_root.suffix}"
+            )
         else:
-            summary_path = summary_root / f"extract_{slug}.json"
+            summary_path = summary_root / default_summary_name
         summary_path.parent.mkdir(parents=True, exist_ok=True)
 
         print("==============================")
