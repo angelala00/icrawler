@@ -132,6 +132,7 @@ def _prepare_task_layout(
     artifact_dir: str,
 ) -> TaskLayout:
     task_slug = core.safe_filename(task.name) or "task"
+    default_structure_filename = f"{task_slug}_structure.json"
 
     pages_base = os.path.join(artifact_dir, "pages")
     if task.from_task_list:
@@ -185,11 +186,12 @@ def _prepare_task_layout(
         )
     build_target = None
     build_source = build_value if isinstance(build_value, str) else None
-    if build_source:
+    if build_source is not None:
         build_target = core._resolve_artifact_path(
             build_source,
             artifact_dir,
             "structure",
+            default_basename=default_structure_filename,
         )
 
     start_url = str(task.start_url) if task.start_url else ""
@@ -202,11 +204,12 @@ def _prepare_task_layout(
     )
     download_target = None
     download_source = download_value if isinstance(download_value, str) else None
-    if download_source:
+    if download_source is not None:
         download_target = core._resolve_artifact_path(
             download_source,
             artifact_dir,
             "structure",
+            default_basename=default_structure_filename,
         )
 
     cache_start_value = core._select_task_value(
@@ -796,21 +799,21 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     parser.add_argument(
         "--build-page-structure",
         nargs="?",
-        const="structure.json",
+        const="",
         dest="build_structure",
         help="build full listing structure to stdout or given file",
     )
     parser.add_argument(
         "--dump-structure",
         nargs="?",
-        const="structure.json",
+        const="",
         dest="build_structure",
         help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--download-from-structure",
         nargs="?",
-        const="structure.json",
+        const="",
         help="download attachments defined in a structure snapshot",
     )
     parser.add_argument(
