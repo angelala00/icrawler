@@ -491,15 +491,28 @@ def _extract_article_slice(
         rf"^\s*第\s*{_CLAUSE_NUMBER_CLASS}+\s*条"
     )
     start_index: Optional[int] = None
+    boundary_pattern = generic_article_pattern
     for idx, norm_line in enumerate(norm_lines):
         if article_pattern.search(norm_line):
             start_index = idx
             break
     if start_index is None:
+        bullet_pattern = re.compile(
+            rf"^\s*(?:{number_pattern})\s*(?:、|\\.|．|﹒|:|：|·|•)"
+        )
+        generic_bullet_pattern = re.compile(
+            rf"^\s*{_CLAUSE_NUMBER_CLASS}+\s*(?:、|\\.|．|﹒|:|：|·|•)"
+        )
+        for idx, norm_line in enumerate(norm_lines):
+            if bullet_pattern.search(norm_line):
+                start_index = idx
+                boundary_pattern = generic_bullet_pattern
+                break
+    if start_index is None:
         return None, None
     end_index = len(lines)
     for idx in range(start_index + 1, len(norm_lines)):
-        if generic_article_pattern.search(norm_lines[idx]):
+        if boundary_pattern.search(norm_lines[idx]):
             end_index = idx
             break
     article_lines = list(lines[start_index:end_index])
