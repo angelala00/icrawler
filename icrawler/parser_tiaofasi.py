@@ -16,6 +16,9 @@ extract_pagination_links = _base_parser.extract_pagination_links
 PAGINATION_TEXT = _base_parser.PAGINATION_TEXT
 
 
+_PAGINATED_INDEX_RE = re.compile(r"^index(?:[_-]?\d+)\.html$", re.IGNORECASE)
+
+
 _DATE_PATTERNS = (
     re.compile(r"\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}(?:日|号)?"),
     re.compile(r"\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日?"),
@@ -87,6 +90,36 @@ def _derive_remark(anchor: Tag, title: str) -> str:
     return ""
 
 
+def _listing_parent_dir(page_url: str) -> Optional[str]:
+    parsed = urlparse(page_url)
+    path = parsed.path or ""
+    current_dir = os.path.dirname(path)
+    if not current_dir:
+        return None
+    basename = os.path.basename(path)
+    if not _PAGINATED_INDEX_RE.match(basename):
+        return None
+    parent_dir = os.path.dirname(current_dir)
+    if not parent_dir or parent_dir == current_dir:
+        return None
+    return parent_dir
+
+
+def _is_listing_directory(page_url: str, candidate_url: str) -> bool:
+    if _base_parser._same_listing_dir(page_url, candidate_url):
+        return True
+    parent_dir = _listing_parent_dir(page_url)
+    if not parent_dir:
+        return False
+    candidate_path = urlparse(candidate_url).path or ""
+    if not candidate_path:
+        return False
+    parent_norm = parent_dir.rstrip("/")
+    if not parent_norm:
+        return False
+    return candidate_path == parent_norm or candidate_path.startswith(parent_norm + "/")
+
+
 def _collect_attachment_links(
     anchor: Tag, page_url: str, suffixes: Sequence[str]
 ) -> List[Dict[str, object]]:
@@ -103,7 +136,7 @@ def _collect_attachment_links(
             if absolute in seen:
                 continue
             doc_type = classify_document_type(absolute)
-            if doc_type == "html" and _base_parser._same_listing_dir(page_url, absolute):
+            if doc_type == "html" and _is_listing_directory(page_url, absolute):
                 continue
             if doc_type == "other":
                 path = urlparse(absolute).path.lower()
@@ -126,6 +159,8 @@ def extract_listing_entries(
     seen: Set[str] = set()
     start_path = urlparse(page_url).path
     start_basename = os.path.basename(start_path)
+    parent_dir = _listing_parent_dir(page_url)
+    parent_norm = parent_dir.rstrip("/") if parent_dir else None
 
     for anchor in soup.find_all("a", href=True):
         href = (anchor.get("href") or "").strip()
@@ -145,8 +180,13 @@ def extract_listing_entries(
         basename = os.path.basename(parsed.path)
         if basename.lower().startswith("index_"):
             continue
-        if not _base_parser._same_listing_dir(page_url, absolute):
+        if not _is_listing_directory(page_url, absolute):
             continue
+        if parent_norm:
+            if parsed.path == parent_norm:
+                continue
+            if parsed.path == f"{parent_norm}/index.html":
+                continue
         if absolute in seen:
             continue
         doc_type = classify_document_type(absolute)
