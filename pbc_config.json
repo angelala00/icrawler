@@ -15,8 +15,23 @@
       "parser": "icrawler.parser_policy"
     },
     {
-      "name": "tiaofasi_notice",
+      "name": "tiaofasi_national_law",
       "start_url": "http://www.pbc.gov.cn/tiaofasi/144941/144951/index.html",
+      "parser": "icrawler.parser_tiaofasi"
+    },
+    {
+      "name": "tiaofasi_administrative_regulation",
+      "start_url": "http://www.pbc.gov.cn/tiaofasi/144941/144953/index.html",
+      "parser": "icrawler.parser_tiaofasi"
+    },
+    {
+      "name": "tiaofasi_departmental_rule",
+      "start_url": "http://www.pbc.gov.cn/tiaofasi/144941/144957/index.html",
+      "parser": "icrawler.parser_tiaofasi"
+    },
+    {
+      "name": "tiaofasi_normative_document",
+      "start_url": "http://www.pbc.gov.cn/tiaofasi/144941/3581332/index.html",
       "parser": "icrawler.parser_tiaofasi"
     }
   ]
