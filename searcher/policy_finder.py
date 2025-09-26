@@ -309,6 +309,30 @@ def default_state_path(task_name: str, start: Optional[Path] = None) -> Path:
             return cand
     return seen[0]
 
+
+def default_extract_path(task_name: str, start: Optional[Path] = None) -> Path:
+    """Return the default extract summary path for a task."""
+
+    project_root = discover_project_root(start)
+    artifact_dir = resolve_artifact_dir(project_root)
+    slug = project_safe_filename(task_name) or "task"
+    filename = f"{slug}_extract.json"
+    candidates = [
+        artifact_dir / "extract" / filename,
+        project_root / "artifacts" / "extract" / filename,
+        (Path(start) if start else Path(__file__).resolve().parent) / filename,
+        Path("/mnt/data") / filename,
+    ]
+    seen: List[Path] = []
+    for cand in candidates:
+        resolved = cand.resolve()
+        if resolved not in seen:
+            seen.append(resolved)
+    for cand in seen:
+        if cand.exists():
+            return cand
+    return seen[0]
+
 @dataclass
 class Entry:
     id: int

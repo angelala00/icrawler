@@ -28,6 +28,18 @@ def fake_pdf_extractor(monkeypatch):
             return "PDF 正文内容"
         if path.endswith("needs_ocr.pdf"):
             return ""
+        if path.endswith("layout.pdf"):
+            return (
+                "Page Header\n\n"
+                "Paragraph line one\n"
+                "line two\n\n"
+                "Page Footer\n"
+                "- 1 -\n"
+                "\fPage Header\n\n"
+                "第二段第一行\n"
+                "继续内容\n\n"
+                "Page Footer\n"
+            )
         raise AssertionError(f"unexpected pdf path: {path}")
 
     monkeypatch.setattr(text_pipeline, "_pdf_text_extractor", extractor)
@@ -56,6 +68,54 @@ def test_extract_entry_supports_wps_docx(tmp_path):
     assert extraction.selected is not None
     assert extraction.selected.normalized_type == "docx"
     assert extraction.text == "WPS 文本内容"
+
+
+def test_extract_entry_flags_binary_wps(tmp_path):
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+
+    wps_path = downloads / "policy_binary.wps"
+    wps_path.write_bytes(b"\xd0\xcf\x11\xe0" + b"\x00" * 128)
+
+    entry = {
+        "documents": [
+            {
+                "url": "http://example.com/policy_binary.wps",
+                "type": "doc",
+                "local_path": str(wps_path),
+            }
+        ]
+    }
+
+    extraction = text_pipeline.extract_entry(entry, downloads)
+
+    assert extraction.selected is not None
+    assert extraction.selected.error == "doc_binary_unsupported"
+    assert extraction.status == "error"
+
+
+def test_extract_entry_normalizes_pdf_text(tmp_path, fake_pdf_extractor):
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+
+    pdf_path = downloads / "layout.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4")
+
+    entry = {
+        "documents": [
+            {
+                "url": "http://example.com/layout.pdf",
+                "type": "pdf",
+                "local_path": str(pdf_path),
+            }
+        ]
+    }
+
+    extraction = text_pipeline.extract_entry(entry, downloads)
+
+    assert extraction.selected is not None
+    assert extraction.selected.normalized_type == "pdf"
+    assert extraction.text == "Paragraph line one line two\n第二段第一行继续内容"
 
 
 def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
@@ -178,4 +238,3 @@ def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
 
     entry_four_docs = [doc for doc in state_data["entries"][3]["documents"] if doc.get("type") == "text"]
     assert entry_four_docs[0]["extraction_status"] == "no_source"
-

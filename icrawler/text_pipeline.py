@@ -14,11 +14,13 @@ stack.
 from __future__ import annotations
 
 import io
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from zipfile import ZipFile
 
+import re
 import xml.etree.ElementTree as ET
 
 from bs4 import BeautifulSoup
@@ -33,6 +35,56 @@ from .crawler import safe_filename
 
 # The active PDF text extractor can be swapped in tests.
 _pdf_text_extractor = _default_pdf_extractor
+
+
+_PAGE_NUMBER_PATTERN = re.compile(r"^-?\s*\d+\s*-?$")
+_HEADER_MAX_LENGTH = 60
+_OPENING_PUNCTUATION = {"(", "[", "{", "\u201c", "\u2018", "\uff08"}
+_CLOSING_PUNCTUATION = {")",
+    "]",
+    "}",
+    ",",
+    ".",
+    ";",
+    ":",
+    "?",
+    "!",
+    "\u201d",
+    "\u2019",
+    "\u3001",
+    "\u3002",
+    "\uff0c",
+    "\uff0e",
+    "\uff1a",
+    "\uff01",
+    "\uff1f",
+    "\uff1b",
+    "\uff09",
+    "\u300b",
+    "\u300d",
+    "\u300f",
+    "\u3011",
+}
+
+_PARAGRAPH_END_CHARS = {
+    ".",
+    "?",
+    "!",
+    ";",
+    ":",
+    "。",
+    "？",
+    "！",
+    "；",
+    "：",
+    "…",
+    ")",
+    "\uff09",
+    "\u300b",
+    "\u300d",
+    "\u300f",
+    "\u3011",
+}
 
 
 def set_pdf_text_extractor(extractor):  # pragma: no cover - exercised in tests
@@ -68,6 +120,133 @@ def _decode_bytes(data: bytes) -> str:
         except UnicodeDecodeError:
             continue
     return data.decode("utf-8", errors="ignore")
+
+
+def _is_cjk(char: str) -> bool:
+    code = ord(char)
+    return (
+        0x3400 <= code <= 0x4DBF
+        or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x20000 <= code <= 0x2A6DF
+        or 0x2A700 <= code <= 0x2B73F
+        or 0x2B740 <= code <= 0x2B81F
+        or 0x2B820 <= code <= 0x2CEAF
+        or 0x2CEB0 <= code <= 0x2EBEF
+        or 0x30000 <= code <= 0x3134F
+    )
+
+
+def _should_insert_space(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    left_char = left[-1]
+    right_char = right[0]
+    if _is_cjk(left_char) or _is_cjk(right_char):
+        return False
+    if left_char in _OPENING_PUNCTUATION:
+        return False
+    if right_char in _CLOSING_PUNCTUATION:
+        return False
+    return left_char.isalnum() and right_char.isalnum()
+
+
+def _merge_wrapped_lines(lines: List[str]) -> str:
+    if not lines:
+        return ""
+    merged = lines[0]
+    for line in lines[1:]:
+        if not merged:
+            merged = line
+            continue
+        if merged.endswith("-") and line and line[0].isalpha():
+            merged = merged.rstrip("-") + line
+            continue
+        if _should_insert_space(merged, line):
+            merged = f"{merged} {line}"
+        else:
+            merged = f"{merged}{line}"
+    return merged
+
+
+def _looks_like_heading(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped:
+        return False
+    if len(stripped) > 20:
+        return False
+    punctuation = {",", ".", "?", "!", "；", "：", "，", "。", "！", "？", ":", ";", "、"}
+    return not any(char in punctuation for char in stripped)
+
+
+def _collect_pdf_page_markers(pages: List[str]) -> Tuple[Set[str], Set[str]]:
+    header_counter: Counter[str] = Counter()
+    footer_counter: Counter[str] = Counter()
+
+    for page in pages:
+        lines = [line.strip() for line in page.splitlines() if line.strip()]
+        if not lines:
+            continue
+        for line in lines[:3]:
+            if len(line) <= _HEADER_MAX_LENGTH:
+                header_counter[line] += 1
+        for line in lines[-3:]:
+            if len(line) <= _HEADER_MAX_LENGTH:
+                footer_counter[line] += 1
+
+    header_candidates = {line for line, count in header_counter.items() if count >= 2}
+    footer_candidates = {line for line, count in footer_counter.items() if count >= 2}
+    return header_candidates, footer_candidates
+
+
+def _normalize_pdf_text(text: str) -> str:
+    if not text:
+        return ""
+
+    pages = text.split("\f")
+    headers, footers = _collect_pdf_page_markers(pages)
+
+    result: List[str] = []
+    paragraph_lines: List[str] = []
+    pending_blank = False
+
+    def flush() -> None:
+        nonlocal paragraph_lines
+        if paragraph_lines:
+            merged = _merge_wrapped_lines(paragraph_lines)
+            if merged:
+                result.append(merged)
+            paragraph_lines = []
+
+    for page in pages:
+        for raw_line in page.splitlines():
+            line = raw_line.strip()
+            if not line:
+                if paragraph_lines:
+                    pending_blank = True
+                continue
+            if _PAGE_NUMBER_PATTERN.match(line):
+                continue
+            if line in headers or line in footers:
+                continue
+            if pending_blank:
+                last_line = paragraph_lines[-1] if paragraph_lines else ""
+                should_break = False
+                if last_line:
+                    last_char = last_line[-1]
+                    if last_char in _PARAGRAPH_END_CHARS:
+                        should_break = True
+                    elif _looks_like_heading(last_line):
+                        should_break = True
+                if should_break:
+                    flush()
+                pending_blank = False
+            paragraph_lines.append(line)
+        # do not force paragraph break at page boundary; paragraphs may span pages
+
+    flush()
+
+    return "\n".join(result)
 
 
 def _extract_docx_text(data: bytes) -> Tuple[Optional[str], Optional[str]]:
@@ -253,6 +432,8 @@ def _attempt_extract(candidate: DocumentCandidate) -> ExtractionAttempt:
         text, error = _extract_docx_text(data)
         return ExtractionAttempt(candidate, text=text, error=error, needs_ocr=False)
     if normalized in {"doc", "word"}:
+        if data.startswith(b"\xd0\xcf\x11\xe0"):
+            return ExtractionAttempt(candidate, text=None, error="doc_binary_unsupported", needs_ocr=False)
         text = _decode_bytes(data)
         stripped = text.strip()
         if not stripped:
@@ -274,11 +455,13 @@ def _attempt_extract(candidate: DocumentCandidate) -> ExtractionAttempt:
             text = _pdf_text_extractor(str(path))
         except Exception:
             return ExtractionAttempt(candidate, text=None, error="pdf_parse_error", needs_ocr=False)
-        stripped = (text or "").strip()
+        raw_text = text or ""
+        stripped = raw_text.strip()
         needs_ocr = not bool(stripped)
         if not stripped:
-            return ExtractionAttempt(candidate, text=text or "", error=None, needs_ocr=needs_ocr)
-        return ExtractionAttempt(candidate, text=text, error=None, needs_ocr=needs_ocr)
+            return ExtractionAttempt(candidate, text=raw_text, error=None, needs_ocr=needs_ocr)
+        normalized_text = _normalize_pdf_text(raw_text)
+        return ExtractionAttempt(candidate, text=normalized_text, error=None, needs_ocr=needs_ocr)
 
     # Fallback: treat as plain text.
     text = _decode_bytes(data)
@@ -481,4 +664,3 @@ def process_state_data(
         records.append(record)
 
     return ProcessReport(records=records)
-
