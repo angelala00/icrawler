@@ -166,6 +166,42 @@ def test_extract_entry_normalizes_html_text(tmp_path):
     assert not text.endswith("中国人民银行发布")
 
 
+def test_extract_entry_separates_conclusion_from_article(tmp_path):
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+
+    html_path = downloads / "conclusion.html"
+    html_path.write_text(
+        """
+<html>
+  <body>
+    <p>八、外国银行境内分行参照本通知执行。</p>
+    <p>本通知自2023年12月20日起实施。</p>
+  </body>
+</html>
+""",
+        encoding="utf-8",
+    )
+
+    entry = {
+        "documents": [
+            {
+                "url": "http://example.com/conclusion.html",
+                "type": "html",
+                "local_path": str(html_path),
+            }
+        ]
+    }
+
+    extraction = text_pipeline.extract_entry(entry, downloads)
+
+    assert extraction.selected is not None
+    lines = extraction.text.splitlines()
+    assert lines[0] == "八、外国银行境内分行参照本通知执行。"
+    assert lines[1] == ""
+    assert lines[2] == "本通知自2023年12月20日起实施。"
+
+
 def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
     downloads = tmp_path / "downloads"
     downloads.mkdir()

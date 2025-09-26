@@ -109,6 +109,11 @@ _HTML_REMOVE_CONTAINS = (
     "网站主办单位",
 )
 
+_HTML_BREAK_BEFORE_PATTERNS = (
+    re.compile(r"^(本通知|本办法|本规定|本细则|本规则|本意见|本通告)自.+(实施|施行|执行)"),
+    re.compile(r"^特此通知"),
+)
+
 
 def set_pdf_text_extractor(extractor):  # pragma: no cover - exercised in tests
     """Override the PDF text extractor used by :func:`extract_entry_text`."""
@@ -298,6 +303,9 @@ def _normalize_html_text(text: str) -> str:
             continue
         if line.endswith(".pdf"):
             continue
+
+        if result and result[-1] and any(pattern.match(line) for pattern in _HTML_BREAK_BEFORE_PATTERNS):
+            append_blank()
 
         if blank_pending:
             append_blank()

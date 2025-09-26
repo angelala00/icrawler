@@ -453,6 +453,21 @@ def _normalize_clause_line(text: str) -> str:
     return normalized
 
 
+_CLAUSE_CONCLUSION_PATTERNS = (
+    re.compile(
+        r"^(本通知|本办法|本规定|本细则|本规则|本意见|本通告|本方案|本决定|本措施|本指南|本公告)自.+(实施|施行|执行|印发|公布|发布)"
+    ),
+    re.compile(r"^特此(通知|公告|通告|说明)"),
+)
+
+
+def _is_conclusion_line(norm_line: str) -> bool:
+    stripped = norm_line.strip()
+    if not stripped:
+        return False
+    return any(pattern.search(stripped) for pattern in _CLAUSE_CONCLUSION_PATTERNS)
+
+
 def _prepare_clause_lines(text: str) -> Tuple[List[str], List[str]]:
     sanitized = text.replace("\r\n", "\n").replace("\r", "\n")
     raw_lines = sanitized.split("\n")
@@ -512,7 +527,11 @@ def _extract_article_slice(
         return None, None
     end_index = len(lines)
     for idx in range(start_index + 1, len(norm_lines)):
-        if boundary_pattern.search(norm_lines[idx]):
+        norm_line = norm_lines[idx]
+        if boundary_pattern.search(norm_line):
+            end_index = idx
+            break
+        if _is_conclusion_line(norm_line):
             end_index = idx
             break
     article_lines = list(lines[start_index:end_index])

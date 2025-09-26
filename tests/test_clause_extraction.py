@@ -45,3 +45,33 @@ def test_extract_clause_handles_bullet_articles(tmp_path):
     assert result_two.error is None
     assert "第二部分" in (result_two.article_text or "")
     assert "第一部分" not in (result_two.article_text or "")
+
+
+def test_extract_clause_omits_conclusion_lines(tmp_path):
+    doc_path = tmp_path / "conclusion.txt"
+    doc_path.write_text(
+        "八、外国银行境内分行参照本通知执行。\n"
+        "\n"
+        "本通知自2023年12月20日起实施。执行过程中如遇问题，请及时向中国人民银行、国家外汇局反馈。\n"
+        "中国人民银行\n"
+        "国家外汇管理局\n"
+        "2023年11月17日\n",
+        "utf-8",
+    )
+
+    entry = Entry(
+        id=1,
+        title="测试文档",
+        remark="",
+        documents=[{"type": "text", "local_path": str(doc_path)}],
+    )
+    entry.build()
+
+    reference = parse_clause_reference("第八条")
+    assert reference is not None
+    result = extract_clause_from_entry(entry, reference)
+
+    assert result.article_matched is True
+    assert result.error is None
+    assert "参照本通知执行" in (result.article_text or "")
+    assert "本通知自" not in (result.article_text or "")
