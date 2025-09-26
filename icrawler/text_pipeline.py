@@ -86,6 +86,12 @@ _PARAGRAPH_END_CHARS = {
     "\u3011",
 }
 
+_HTML_REMOVE_LINES = {
+    "中国人民银行规章",
+    "中国人民银行发布",
+    "打印本页",
+}
+
 
 def set_pdf_text_extractor(extractor):  # pragma: no cover - exercised in tests
     """Override the PDF text extractor used by :func:`extract_entry_text`."""
@@ -245,6 +251,46 @@ def _normalize_pdf_text(text: str) -> str:
         # do not force paragraph break at page boundary; paragraphs may span pages
 
     flush()
+
+    return "\n".join(result)
+
+
+def _normalize_html_text(text: str) -> str:
+    if not text:
+        return ""
+
+    result: List[str] = []
+    blank_pending = False
+
+    def append_blank() -> None:
+        if result and result[-1] != "":
+            result.append("")
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            blank_pending = True
+            continue
+
+        lower = line.lower()
+        if line in _HTML_REMOVE_LINES:
+            continue
+        if "下载" in line and ("word" in lower or "pdf" in lower):
+            continue
+
+        if blank_pending:
+            append_blank()
+            blank_pending = False
+
+        if result and result[-1] == line:
+            continue
+
+        result.append(line)
+
+    while result and result[0] == "":
+        result.pop(0)
+    while result and result[-1] == "":
+        result.pop()
 
     return "\n".join(result)
 
@@ -445,6 +491,7 @@ def _attempt_extract(candidate: DocumentCandidate) -> ExtractionAttempt:
         for tag in soup(["script", "style"]):
             tag.decompose()
         text = soup.get_text("\n", strip=True)
+        text = _normalize_html_text(text)
         if not text.strip():
             return ExtractionAttempt(candidate, text=None, error="html_empty", needs_ocr=False)
         return ExtractionAttempt(candidate, text=text, error=None, needs_ocr=False)

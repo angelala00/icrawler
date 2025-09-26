@@ -118,6 +118,47 @@ def test_extract_entry_normalizes_pdf_text(tmp_path, fake_pdf_extractor):
     assert extraction.text == "Paragraph line one line two\n第二段第一行继续内容"
 
 
+def test_extract_entry_normalizes_html_text(tmp_path):
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+
+    html_path = downloads / "policy.html"
+    html_path.write_text(
+        """
+<html>
+  <body>
+    <div>中国人民银行规章</div>
+    <div>下载word版</div>
+    <div>下载pdf版</div>
+    <h1>制度标题</h1>
+    <p>第一段内容。</p>
+    <p>中国人民银行发布</p>
+  </body>
+</html>
+""",
+        encoding="utf-8",
+    )
+
+    entry = {
+        "documents": [
+            {
+                "url": "http://example.com/policy.html",
+                "type": "html",
+                "local_path": str(html_path),
+            }
+        ]
+    }
+
+    extraction = text_pipeline.extract_entry(entry, downloads)
+
+    assert extraction.selected is not None
+    text = extraction.text
+    assert text.splitlines()[0] == "制度标题"
+    assert "下载word版" not in text
+    assert "中国人民银行规章" not in text
+    assert not text.endswith("中国人民银行发布")
+
+
 def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
     downloads = tmp_path / "downloads"
     downloads.mkdir()
