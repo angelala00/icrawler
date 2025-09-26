@@ -522,6 +522,13 @@ def download_document(
     )
 
 
+def _is_supported_download_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme and parsed.scheme.lower() not in {"http", "https"}:
+        return False
+    return True
+
+
 def _discover_detail_attachments(
     detail_url: str, local_path: Optional[str]
 ) -> List[Dict[str, object]]:
@@ -541,6 +548,8 @@ def _discover_detail_attachments(
         if not raw_href:
             continue
         file_url = urljoin(detail_url, raw_href)
+        if not _is_supported_download_url(file_url):
+            continue
         doc_type = classify_document_type(file_url)
         if doc_type == "html":
             continue
@@ -608,6 +617,8 @@ def _process_documents_for_entry(
         document = doc_queue.pop(0)
         file_url = document.get("url")
         if not isinstance(file_url, str) or not file_url:
+            continue
+        if not _is_supported_download_url(file_url):
             continue
         if file_url in seen_urls:
             continue

@@ -1102,6 +1102,72 @@ def test_download_from_structure_downloads_files(tmp_path):
     assert pdf_doc["local_path"].endswith("file1.pdf")
 
 
+def test_download_from_structure_ignores_javascript_links(tmp_path):
+    structure_path = os.path.join(tmp_path, "structure.json")
+    output_dir = os.path.join(tmp_path, "downloads")
+    state_path = os.path.join(tmp_path, "state.json")
+    javascript_url = "javascript:window.open('','_parent','');window.close();"
+    pdf_url = "http://example.com/file2.pdf"
+    structure_data = {
+        "entries": [
+            {
+                "serial": 1,
+                "title": "测试公告",
+                "remark": "",
+                "documents": [
+                    {
+                        "url": javascript_url,
+                        "type": "html",
+                        "title": "关闭窗口",
+                    },
+                    {
+                        "url": pdf_url,
+                        "type": "pdf",
+                        "title": "附件二",
+                    },
+                ],
+            }
+        ]
+    }
+    with open(structure_path, "w", encoding="utf-8") as handle:
+        json.dump(structure_data, handle)
+
+    download_calls = []
+
+    def fake_download_document(session, file_url, out_dir, delay, jitter, timeout, doc_type):
+        download_calls.append((file_url, doc_type))
+        os.makedirs(out_dir, exist_ok=True)
+        name = os.path.basename(file_url)
+        if not name:
+            name = pbc_monitor.safe_filename(file_url)
+        target = os.path.join(out_dir, name)
+        with open(target, "w", encoding="utf-8") as fh:
+            fh.write("dummy")
+        return target
+
+    original_download_document = pbc_monitor.download_document
+    try:
+        pbc_monitor.download_document = fake_download_document
+        result = pbc_monitor.download_from_structure(
+            structure_path,
+            output_dir,
+            state_path,
+            delay=0.1,
+            jitter=0.0,
+            timeout=5.0,
+        )
+    finally:
+        pbc_monitor.download_document = original_download_document
+
+    assert download_calls == [(pdf_url, "pdf")]
+    assert len(result) == 1
+    with open(state_path, "r", encoding="utf-8") as handle:
+        state_data = json.load(handle)
+    documents = {doc["url"]: doc for doc in state_data["entries"][0]["documents"]}
+    assert documents[pdf_url]["downloaded"] is True
+    assert documents[javascript_url].get("downloaded") is not True
+
+
 def test_download_document_html_uses_path_segments(tmp_path):
     original_fetch = pbc_monitor._fetch
     try:
