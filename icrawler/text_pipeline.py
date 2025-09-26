@@ -384,56 +384,12 @@ def _summarize_attempt(attempt: ExtractionAttempt) -> Dict[str, Any]:
     return summary
 
 
-def _build_text_content(entry: Dict[str, Any], extraction: EntryExtraction, text: str) -> str:
-    lines: List[str] = []
-    title = entry.get("title") or ""
-    serial = entry.get("serial")
-    remark = entry.get("remark") or ""
-    lines.append("=== 元数据 ===")
-    lines.append(f"制度名称: {title}")
-    lines.append(f"制度编号: {serial if serial is not None else ''}")
-    lines.append(f"备注: {remark}")
-    if extraction.selected:
-        candidate = extraction.selected.candidate
-        source_type = extraction.selected.normalized_type or candidate.declared_type or "unknown"
-        lines.append(f"提取使用的源文件类型: {source_type}")
-        lines.append(f"提取使用的源文件路径: {candidate.path}")
-        source_url = candidate.document.get("url")
-        lines.append(f"源文件链接: {source_url or ''}")
-    else:
-        lines.append("提取使用的源文件类型: ")
-        lines.append("提取使用的源文件路径: ")
-        lines.append("源文件链接: ")
-    lines.append(f"提取状态: {extraction.status}")
-    lines.append(f"PDF 需要 OCR: {'是' if extraction.pdf_needs_ocr else '否'}")
-    lines.append("")
-    lines.append("=== 提取尝试 ===")
-    if extraction.attempts:
-        for attempt in extraction.attempts:
-            status_parts: List[str] = []
-            if attempt.used:
-                status_parts.append("使用")
-            if attempt.error:
-                status_parts.append(f"错误: {attempt.error}")
-            elif attempt.text is not None:
-                status_parts.append(f"字符数: {len(attempt.text)}")
-            if attempt.needs_ocr:
-                status_parts.append("需要 OCR")
-            status = "，".join(status_parts) if status_parts else ""
-            lines.append(
-                f"- {attempt.normalized_type or attempt.candidate.declared_type or 'unknown'} -> {attempt.path} {status}".rstrip()
-            )
-    else:
-        lines.append("无可用的本地文件。")
-    lines.append("")
-    lines.append("=== 提取文本 ===")
-    stripped = text.strip()
-    if stripped:
-        lines.append(text)
-    else:
-        lines.append("[未提取到文本内容]")
-    lines.append("")
-    return "\n".join(lines)
+def _build_text_content(text: str) -> str:
+    """Return the plain extracted text content for persistence."""
+
+    if not text:
+        return ""
+    return text
 
 
 def process_state_data(
@@ -459,7 +415,7 @@ def process_state_data(
         filename = _build_filename(entry, extraction.selected, index, used_names)
         text_path = output_dir / filename
         text_content = extraction.text if extraction.text is not None else ""
-        text_output = _build_text_content(entry, extraction, text_content)
+        text_output = _build_text_content(text_content)
         text_path.write_text(text_output, encoding="utf-8")
 
         document_url = f"local-text://{filename}"

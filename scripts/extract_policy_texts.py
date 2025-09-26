@@ -4,8 +4,9 @@ This helper now supports two workflows:
 
 * When a ``state_file`` argument is supplied it behaves like the
   original version – writing extracted text files next to the provided
-  state JSON (unless overridden via ``--output-dir``) and saving the
-  updated state structure.
+  state JSON (unless overridden via ``--output-dir``).  Saving an
+  updated state structure is now optional via ``--save-updated-state``
+  or ``--output-state``.
 * When executed without positional arguments the script discovers all
   available task state files using the crawler configuration and writes
   the generated text files to ``<artifact_dir>/extract/<task>/``.  A
@@ -53,11 +54,16 @@ def _format_summary(report: ProcessReport) -> str:
     return "\n".join(lines)
 
 
-def run(state_path: Path, output_dir: Path, output_state_path: Path) -> Tuple[ProcessReport, Dict[str, Any]]:
+def run(
+    state_path: Path,
+    output_dir: Path,
+    output_state_path: Optional[Path] = None,
+) -> Tuple[ProcessReport, Dict[str, Any]]:
     data: Dict[str, Any] = json.loads(state_path.read_text(encoding="utf-8"))
     report = process_state_data(data, output_dir, state_path=state_path)
-    output_state_path.parent.mkdir(parents=True, exist_ok=True)
-    output_state_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    if output_state_path is not None:
+        output_state_path.parent.mkdir(parents=True, exist_ok=True)
+        output_state_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return report, data
 
 
@@ -189,7 +195,7 @@ def _build_summary_payload(
     report: ProcessReport,
     state_data: Dict[str, Any],
     output_dir: Path,
-    output_state_path: Path,
+    output_state_path: Optional[Path],
 ) -> Dict[str, Any]:
     entries: List[Dict[str, Any]]
     raw_entries = state_data.get("entries")
@@ -209,10 +215,35 @@ def _build_summary_payload(
             "text_path": str(record.text_path),
             "text_filename": record.text_path.name,
         }
+        remark = None
+        if record.entry_index < len(entries):
+            raw_entry = entries[record.entry_index]
+            if isinstance(raw_entry, dict):
+                remark = raw_entry.get("remark")
+        if remark is not None:
+            entry_payload["remark"] = remark
         if record.source_type:
             entry_payload["source_type"] = record.source_type
         if record.source_path:
             entry_payload["source_path"] = record.source_path
+        if record.attempts:
+            attempts: List[Dict[str, Any]] = []
+            for attempt in record.attempts:
+                attempt_payload: Dict[str, Any] = {
+                    "type": attempt.normalized_type or attempt.candidate.declared_type,
+                    "path": str(attempt.path),
+                    "used": attempt.used,
+                    "needs_ocr": attempt.needs_ocr,
+                }
+                if attempt.error:
+                    attempt_payload["error"] = attempt.error
+                if attempt.text is not None:
+                    attempt_payload["char_count"] = len(attempt.text)
+                source_url = attempt.candidate.document.get("url")
+                if source_url:
+                    attempt_payload["url"] = source_url
+                attempts.append(attempt_payload)
+            entry_payload["extraction_attempts"] = attempts
         if record.entry_index < len(entries):
             entry_payload["entry"] = entries[record.entry_index]
         results.append(entry_payload)
@@ -221,7 +252,7 @@ def _build_summary_payload(
         "task": plan.display_name,
         "task_slug": plan.slug,
         "state_file": str(plan.state_file),
-        "output_state_file": str(output_state_path),
+        "output_state_file": str(output_state_path) if output_state_path else None,
         "text_output_dir": str(output_dir),
         "entries": results,
     }
@@ -242,6 +273,11 @@ def main() -> None:  # pragma: no cover - exercised via integration tests
         type=Path,
         default=None,
         help="生成的新 state.json 文件路径，默认在原文件名后追加 _with_text",
+    )
+    parser.add_argument(
+        "--save-updated-state",
+        action="store_true",
+        help="写入包含文本的 state 副本（默认不保存）",
     )
     parser.add_argument(
         "--summary",
@@ -278,9 +314,9 @@ def main() -> None:  # pragma: no cover - exercised via integration tests
         output_dir = output_dir.expanduser().resolve()
 
         output_state_path = args.output_state
-        if output_state_path is None:
+        if output_state_path is None and args.save_updated_state:
             output_state_path = _default_output_state_path(state_path)
-        output_state_path = output_state_path.expanduser().resolve()
+        output_state_path = output_state_path.expanduser().resolve() if output_state_path else None
 
         report, state_data = run(state_path, output_dir, output_state_path)
         print(_format_summary(report))
@@ -324,8 +360,11 @@ def main() -> None:  # pragma: no cover - exercised via integration tests
             print(f"跳过任务 {plan.display_name}：state 文件不存在 ({state_path})")
             continue
 
-        default_state_name = _default_output_state_path(state_path).name
-        output_state_path = output_dir / default_state_name
+        if args.save_updated_state:
+            default_state_name = _default_output_state_path(state_path).name
+            output_state_path = output_dir / default_state_name
+        else:
+            output_state_path = None
 
         default_summary_name = f"{slug}_extract.json"
         if summary_root is None:
@@ -342,7 +381,10 @@ def main() -> None:  # pragma: no cover - exercised via integration tests
         print(f"任务: {plan.display_name} (slug: {slug})")
         print(f"State 文件: {state_path}")
         print(f"文本输出目录: {output_dir}")
-        print(f"更新后的 state 文件: {output_state_path}")
+        if output_state_path is not None:
+            print(f"更新后的 state 文件: {output_state_path}")
+        else:
+            print("不会写入新的 state 文件。")
         print(f"摘要结果: {summary_path}")
         print("开始提取文本...")
 
