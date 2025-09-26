@@ -21,10 +21,14 @@ ATTACHMENT_SUFFIXES = (
     ".rar",
 )
 PAGINATION_TEXT = {"下一页", "下页", "上一页", "末页", "尾页", "首页"}
+PAGINATION_SYMBOLS = {"<", ">", "«", "»", "‹", "›", "<<", ">>"}
 PAGINATION_NEXT = {"下一页", "下页"}
 PAGINATION_PREV = {"上一页", "上页"}
 PAGINATION_FIRST = {"首页"}
 PAGINATION_LAST = {"末页", "尾页"}
+
+_PAGINATION_NUMBER_RE = re.compile(r"^\d+$")
+_PAGINATION_PAGE_RE = re.compile(r"^(?:第\s*)?\d+\s*页?$")
 
 DOCUMENT_TYPE_MAP = {
     ".pdf": "pdf",
@@ -521,6 +525,33 @@ def _resolve_pagination_url(tag: Tag, current_url: str, start_url: str) -> Optio
     return None
 
 
+def _looks_like_pagination_label(tag: Tag, text: str) -> bool:
+    normalized = re.sub(r"\s+", "", text or "")
+    if not normalized:
+        return False
+    if normalized in PAGINATION_TEXT or normalized in PAGINATION_SYMBOLS:
+        return True
+    if _PAGINATION_NUMBER_RE.fullmatch(normalized):
+        return True
+    if _PAGINATION_PAGE_RE.fullmatch(normalized):
+        return True
+
+    data_page = (tag.get("data-page") or "").strip()
+    if data_page.isdigit():
+        return True
+
+    rel_attr = tag.get("rel")
+    rel_tokens: Set[str] = set()
+    if isinstance(rel_attr, (list, tuple)):
+        rel_tokens = {str(item).strip().lower() for item in rel_attr if isinstance(item, str)}
+    elif isinstance(rel_attr, str):
+        rel_tokens = {token.strip().lower() for token in rel_attr.split() if token.strip()}
+    if rel_tokens & {"next", "prev", "previous", "first", "last"}:
+        return True
+
+    return False
+
+
 def extract_pagination_meta(
     current_url: str,
     soup: BeautifulSoup,
@@ -546,6 +577,8 @@ def extract_pagination_meta(
     for tag in anchors:
         text = (tag.get_text() or "").strip()
         if not text:
+            continue
+        if not _looks_like_pagination_label(tag, text):
             continue
         resolved = _resolve_pagination_url(tag, current_url, start_url)
         if not resolved:

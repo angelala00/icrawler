@@ -538,6 +538,27 @@ def test_extract_pagination_links():
     assert "http://www.pbc.gov.cn/zhengwugongkai/4081330/4406346/4406348/index_3.html" in pages
 
 
+def test_extract_pagination_links_ignores_detail_links_when_no_container():
+    html = """
+    <html><body>
+      <ul>
+        <li><a href="detail1.html">公告甲</a></li>
+        <li><a href="detail2.html">公告乙</a></li>
+      </ul>
+      <div class="pager">
+        <a href="index_2.html">下一页</a>
+      </div>
+    </body></html>
+    """
+    soup = _make_soup(html)
+    pages = pbc_monitor.extract_pagination_links(
+        "http://example.com/list/index.html",
+        soup,
+        "http://example.com/list/index.html",
+    )
+    assert pages == ["http://example.com/list/index_2.html"]
+
+
 def test_state_roundtrip():
     with tempfile.TemporaryDirectory() as tmpdir:
         state_path = os.path.join(tmpdir, "pbc_state.json")
