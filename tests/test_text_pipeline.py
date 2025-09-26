@@ -34,6 +34,30 @@ def fake_pdf_extractor(monkeypatch):
     return extractor
 
 
+def test_extract_entry_supports_wps_docx(tmp_path):
+    downloads = tmp_path / "downloads"
+    downloads.mkdir()
+
+    wps_path = downloads / "policy.wps"
+    _write_docx(wps_path, "WPS 文本内容")
+
+    entry = {
+        "documents": [
+            {
+                "url": "http://example.com/policy.wps",
+                "type": "doc",
+                "local_path": str(wps_path),
+            }
+        ]
+    }
+
+    extraction = text_pipeline.extract_entry(entry, downloads)
+
+    assert extraction.selected is not None
+    assert extraction.selected.normalized_type == "docx"
+    assert extraction.text == "WPS 文本内容"
+
+
 def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
     downloads = tmp_path / "downloads"
     downloads.mkdir()

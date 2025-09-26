@@ -238,6 +238,17 @@ def _attempt_extract(candidate: DocumentCandidate) -> ExtractionAttempt:
     except FileNotFoundError:
         return ExtractionAttempt(candidate, text=None, error="file_missing", needs_ocr=False)
 
+    if normalized not in {"docx"}:
+        if data[:2] == b"PK":
+            buffer = io.BytesIO(data)
+            try:
+                with ZipFile(buffer) as archive:
+                    if "word/document.xml" in archive.namelist():
+                        normalized = "docx"
+                        candidate.normalized_type = "docx"
+            except Exception:
+                pass
+
     if normalized in {"docx"}:
         text, error = _extract_docx_text(data)
         return ExtractionAttempt(candidate, text=text, error=error, needs_ocr=False)
