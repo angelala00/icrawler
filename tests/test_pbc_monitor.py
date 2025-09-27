@@ -970,7 +970,7 @@ def test_dump_structure_default_artifacts(tmp_path):
         os.chdir(cwd)
 
     structure_path = os.path.join(
-        tmp_path, "artifacts", "structure", "default_structure.json"
+        tmp_path, "artifacts", "pages", "default_structure.json"
     )
     assert os.path.exists(structure_path)
     with open(structure_path, "r", encoding="utf-8") as handle:
@@ -1495,7 +1495,7 @@ def test_collect_new_files_verify_local_recovers_missing(tmp_path):
 
 def test_main_download_from_structure(tmp_path):
     artifact_dir = os.path.join(tmp_path, "artifacts")
-    structure_dir = os.path.join(artifact_dir, "structure")
+    structure_dir = os.path.join(artifact_dir, "pages")
     os.makedirs(structure_dir, exist_ok=True)
     structure_path = os.path.join(structure_dir, "default_structure.json")
     with open(structure_path, "w", encoding="utf-8") as handle:
@@ -1555,7 +1555,7 @@ def test_main_download_from_structure(tmp_path):
 
 def test_main_download_from_structure_verify_local(tmp_path):
     artifact_dir = os.path.join(tmp_path, "artifacts")
-    structure_dir = os.path.join(artifact_dir, "structure")
+    structure_dir = os.path.join(artifact_dir, "pages")
     os.makedirs(structure_dir, exist_ok=True)
     structure_path = os.path.join(structure_dir, "default_structure.json")
     with open(structure_path, "w", encoding="utf-8") as handle:
