@@ -12,6 +12,13 @@
       : null;
   const searchEnabled =
     Boolean(searchConfig && searchConfig.enabled) && !staticSnapshot;
+  const searchReason =
+    searchConfig && typeof searchConfig.reason === "string"
+      ? searchConfig.reason.trim()
+      : "";
+  const shouldIncludePolicyFinderEndpoints = Boolean(
+    searchConfig && (searchConfig.enabled || searchConfig.endpoint),
+  );
 
   const endpointListEl = document.getElementById("api-endpoint-list");
   const endpointTitleEl = document.getElementById("api-endpoint-title");
@@ -60,32 +67,163 @@
     },
   ];
 
-  if (searchEnabled) {
+  if (shouldIncludePolicyFinderEndpoints) {
     const searchPath =
       typeof searchConfig.endpoint === "string" && searchConfig.endpoint
         ? searchConfig.endpoint
         : "/api/search";
-    defaultEndpoints.push({
-      id: "search",
-      name: "Policy search",
-      method: "POST",
-      path: searchPath,
-      description:
-        "Search indexed policy content. Configure the request body to control keywords and the number of results.",
-      query: "",
-      hint:
-        'Send a JSON body such as {"query": "keyword", "topk": 5, "include_documents": true}.',
-      body: JSON.stringify(
-        {
-          query: "financial regulation",
-          topk: searchConfig.defaultTopk || 5,
-          include_documents:
-            searchConfig.includeDocuments === false ? false : true,
-        },
-        null,
-        2,
-      ),
-    });
+    const normalizedSearchPath = normalizePath(searchPath);
+    let searchUrl = null;
+    try {
+      searchUrl = new URL(normalizedSearchPath, window.location.origin);
+    } catch (error) {
+      searchUrl = null;
+    }
+    const searchIsAbsolute = /^https?:\/\//i.test(normalizedSearchPath);
+    const searchOrigin = searchUrl && searchIsAbsolute ? searchUrl.origin : "";
+    const searchPathname = searchUrl ? searchUrl.pathname : normalizedSearchPath;
+    const baseSuffix = "/search";
+    let searchBasePath = searchPathname;
+    if (typeof searchBasePath === "string") {
+      const lower = searchBasePath.toLowerCase();
+      if (lower.endsWith(baseSuffix)) {
+        const nextValue = searchBasePath.slice(0, -baseSuffix.length);
+        searchBasePath = nextValue || (searchOrigin ? "/" : "");
+      }
+    } else {
+      searchBasePath = "";
+    }
+    const resolveFinderPath = (segment) => {
+      const value = typeof segment === "string" ? segment.trim() : "";
+      if (!value) {
+        return normalizedSearchPath;
+      }
+      const relative = value.startsWith("/") ? value : `/${value}`;
+      const base = !searchBasePath || searchBasePath === "/"
+        ? ""
+        : searchBasePath.replace(/\/$/, "");
+      const combinedPath = (base + relative) || relative;
+      const finalPath = combinedPath || relative || "/";
+      if (searchOrigin) {
+        return `${searchOrigin}${finalPath}`;
+      }
+      if (searchIsAbsolute && searchUrl) {
+        return `${searchUrl.origin}${finalPath}`;
+      }
+      return finalPath;
+    };
+
+    const includeDocumentsDefault =
+      searchConfig && searchConfig.includeDocuments === false ? false : true;
+    const defaultTopk =
+      searchConfig && typeof searchConfig.defaultTopk === "number"
+        ? searchConfig.defaultTopk
+        : 5;
+    const searchDisabledReason = !searchEnabled
+      ? searchReason || "Policy search is currently unavailable."
+      : "";
+
+    defaultEndpoints.push(
+      {
+        id: "search-get",
+        name: "Policy search (GET)",
+        method: "GET",
+        path: normalizedSearchPath,
+        description:
+          "Run a keyword query against the indexed policy corpus using query string parameters.",
+        query: `query=金融监管&topk=${defaultTopk}&include_documents=${includeDocumentsDefault}`,
+        hint:
+          "Provide ?query= keywords. Optional ?topk= controls the number of matches and ?include_documents= toggles document payloads.",
+        body: "",
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
+      },
+      {
+        id: "search-post",
+        name: "Policy search (POST)",
+        method: "POST",
+        path: normalizedSearchPath,
+        description:
+          "Search indexed policy content. Configure the JSON body to control keywords, result count, and document payloads.",
+        query: "",
+        hint:
+          'Send a JSON body such as {"query": "keyword", "topk": 5, "include_documents": true}.',
+        body: JSON.stringify(
+          {
+            query: "financial regulation",
+            topk: defaultTopk,
+            include_documents: includeDocumentsDefault,
+          },
+          null,
+          2,
+        ),
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
+      },
+      {
+        id: "search-policies",
+        name: "Policy catalog",
+        method: "GET",
+        path: resolveFinderPath("policies"),
+        description:
+          "List every indexed policy entry or filter the catalog by keyword.",
+        query: "query=数字人民币",
+        hint:
+          "Use ?query= to narrow results. Omitting the parameter returns the full catalog sorted by title.",
+        body: "",
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
+      },
+      {
+        id: "search-policy-detail",
+        name: "Policy details",
+        method: "GET",
+        path: resolveFinderPath("policies/{policy_id}"),
+        description:
+          "Fetch a single policy by its identifier and optionally include text or outline details.",
+        query: "include=meta&include=text",
+        hint:
+          "Add one or more ?include= values (meta, text, outline, all) to control the response payload.",
+        body: "",
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
+      },
+      {
+        id: "search-clause-get",
+        name: "Clause lookup (GET)",
+        method: "GET",
+        path: resolveFinderPath("clause"),
+        description:
+          "Resolve a specific clause or article from a policy by supplying the title and clause reference.",
+        query: "title=中国人民银行公告(2024)第1号&item=第一条",
+        hint:
+          "Both ?title= and ?item= (or ?clause=/ ?article=) are required to locate the matching clause.",
+        body: "",
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
+      },
+      {
+        id: "search-clause-post",
+        name: "Clause lookup (POST)",
+        method: "POST",
+        path: resolveFinderPath("clause"),
+        description:
+          "Resolve a policy clause using a JSON payload. Useful when sending structured references.",
+        query: "",
+        hint:
+          'Provide a JSON body such as {"title": "政策标题", "item": "第一条"}. The API also accepts "clause" or "article".',
+        body: JSON.stringify(
+          {
+            title: "中国人民银行公告(2024)第1号",
+            item: "第一条",
+          },
+          null,
+          2,
+        ),
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
+      },
+    );
   }
 
   const customEndpoints = Array.isArray(explorerConfig.endpoints)
@@ -213,6 +351,13 @@
       pathEl.textContent = `${endpoint.method} ${endpoint.path}`;
       button.appendChild(nameEl);
       button.appendChild(pathEl);
+      if (endpoint.disabled) {
+        button.classList.add("is-disabled");
+        if (endpoint.disabledReason) {
+          button.title = endpoint.disabledReason;
+        }
+        button.setAttribute("aria-disabled", "true");
+      }
       button.addEventListener("click", () => {
         selectEndpoint(endpoint.id);
       });
@@ -235,18 +380,33 @@
 
   function updateEndpointDetails(endpoint) {
     if (endpointTitleEl) {
-      endpointTitleEl.textContent = endpoint
-        ? endpoint.name
-        : "Request builder";
+      let titleText = endpoint ? endpoint.name : "Request builder";
+      if (endpoint && endpoint.disabled) {
+        titleText += " (unavailable)";
+      }
+      endpointTitleEl.textContent = titleText;
     }
     if (endpointDescriptionEl) {
-      endpointDescriptionEl.textContent = endpoint
-        ? endpoint.description || "Configure the request and send it to view the response."
+      const baseDescription = endpoint
+        ? endpoint.description ||
+          "Configure the request and send it to view the response."
         : "Choose an endpoint or enter a path to send a request.";
+      const descriptionText = endpoint && endpoint.disabled && endpoint.disabledReason
+        ? `${baseDescription} ${endpoint.disabledReason}`.trim()
+        : baseDescription;
+      endpointDescriptionEl.textContent = descriptionText;
     }
     if (endpointHintEl) {
+      const hintParts = [];
       if (endpoint && endpoint.hint) {
-        endpointHintEl.textContent = endpoint.hint;
+        hintParts.push(endpoint.hint);
+      }
+      if (endpoint && endpoint.disabled && endpoint.disabledReason) {
+        hintParts.push(endpoint.disabledReason);
+      }
+      const hintText = hintParts.join(" ").trim();
+      if (hintText) {
+        endpointHintEl.textContent = hintText;
         endpointHintEl.classList.remove("hidden");
       } else {
         endpointHintEl.textContent = "";
