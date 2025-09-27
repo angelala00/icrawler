@@ -1,6 +1,6 @@
-"""Entry point forwarding to the external portal CLI implementation."""
+"""Entry point forwarding to the integrated portal CLI implementation."""
 
-from icrawler_portal import main
+from icrawler.portal import main
 
 if __name__ == "__main__":
     main()
