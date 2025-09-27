@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from typing import List, Tuple
 
 import pytest
 
@@ -319,6 +320,25 @@ def test_process_state_data_extracts_text(tmp_path, fake_pdf_extractor):
     assert record_four.status == "no_source"
     content_four = record_four.text_path.read_text(encoding="utf-8")
     assert content_four == ""
-
     entry_four_docs = [doc for doc in state_data["entries"][3]["documents"] if doc.get("type") == "text"]
     assert entry_four_docs[0]["extraction_status"] == "no_source"
+
+
+def test_process_state_data_reports_progress(tmp_path):
+    state_data = {
+        "entries": [
+            {"title": "制度一"},
+            {"title": "制度二"},
+        ]
+    }
+
+    output_dir = tmp_path / "texts"
+    progress_updates: List[Tuple[int, str]] = []
+
+    def _capture(record):
+        progress_updates.append((record.entry_index, record.title))
+
+    report = process_state_data(state_data, output_dir, progress_callback=_capture)
+
+    assert len(report.records) == 2
+    assert progress_updates == [(0, "制度一"), (1, "制度二")]
