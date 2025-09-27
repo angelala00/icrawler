@@ -792,14 +792,11 @@ body.entries-page {
 .entries-header {
   background: #1f2a44;
   color: #fff;
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
 }
 
 .entries-header__top {
   gap: 1rem;
+  align-items: center;
 }
 
 .entries-header__back {
@@ -809,19 +806,28 @@ body.entries-page {
   white-space: nowrap;
 }
 
-.entries-header__meta {
-  font-size: 0.9rem;
-  opacity: 0.85;
-}
-
 .entries-header__title {
   margin: 0;
   font-size: 1.7rem;
 }
 
-.entries-header__subtitle {
+.entries-header__meta,
+.entries-header__summary {
   margin: 0;
+  font-size: 0.95rem;
   color: rgba(255, 255, 255, 0.85);
+}
+
+.entries-header__meta,
+.entries-header__summary {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.entries-header__summary {
+  min-height: 1.5em;
 }
 
 .entries-main {
