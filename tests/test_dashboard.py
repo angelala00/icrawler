@@ -10,14 +10,14 @@ from datetime import datetime, timedelta
 sys.modules.pop("bs4", None)
 importlib.import_module("bs4")
 
-dashboard = importlib.import_module("icrawler.dashboard")
+dashboard = importlib.import_module("pbc_regulations.icrawler.dashboard")
 collect_task_overviews = dashboard.collect_task_overviews
 create_dashboard_app = dashboard.create_dashboard_app
 render_dashboard_html = dashboard.render_dashboard_html
 
-from icrawler.crawler import safe_filename
-from icrawler.fetching import build_cache_path_for_url
-from icrawler.state import PBCState, save_state
+from pbc_regulations.icrawler.crawler import safe_filename
+from pbc_regulations.icrawler.fetching import build_cache_path_for_url
+from pbc_regulations.icrawler.state import PBCState, save_state
 
 
 def _create_state(state_path: str) -> None:

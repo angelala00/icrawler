@@ -4,8 +4,8 @@ from typing import List, Tuple
 
 import pytest
 
-from icrawler import text_pipeline
-from icrawler.text_pipeline import process_state_data
+from pbc_regulations.icrawler import text_pipeline
+from pbc_regulations.icrawler.text_pipeline import process_state_data
 
 
 def _write_docx(path: Path, text: str) -> None:

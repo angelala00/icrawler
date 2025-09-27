@@ -26,7 +26,7 @@ from .state import ClassifierFn, PBCState, load_state as _load_state, save_state
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PARSER_SPEC = "icrawler.parser"
+DEFAULT_PARSER_SPEC = "pbc_regulations.icrawler.parser"
 _current_parser_module: ModuleType = importlib.import_module(DEFAULT_PARSER_SPEC)
 
 

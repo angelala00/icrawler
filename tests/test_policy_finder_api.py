@@ -11,9 +11,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from searcher.api_server import create_app  # noqa: E402
-from searcher.clause_lookup import ClauseLookup  # noqa: E402
-from searcher.policy_finder import DEFAULT_SEARCH_TASKS, PolicyFinder  # noqa: E402
+from pbc_regulations.searcher.api_server import create_app  # noqa: E402
+from pbc_regulations.searcher.clause_lookup import ClauseLookup  # noqa: E402
+from pbc_regulations.searcher.policy_finder import (  # noqa: E402
+    DEFAULT_SEARCH_TASKS,
+    PolicyFinder,
+)
 
 
 @pytest.fixture

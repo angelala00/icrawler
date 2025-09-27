@@ -33,9 +33,9 @@ sys.modules["bs4"] = bs4_stub
 pdfkit_stub = types.SimpleNamespace(from_url=lambda *a, **k: None)
 sys.modules["pdfkit"] = pdfkit_stub
 import importlib
-import icrawler.crawler as crawler
+import pbc_regulations.icrawler.crawler as crawler
 importlib.reload(crawler)
-from icrawler.crawler import crawl
+from pbc_regulations.icrawler.crawler import crawl
 
 class DummyResponse:
     def __init__(self, text=""):
@@ -47,11 +47,11 @@ class DummyResponse:
 
 def test_crawl_respects_delay(tmp_path, monkeypatch):
     html = '<a href="file.pdf">pdf</a>'
-    monkeypatch.setattr("icrawler.crawler.requests.get", lambda url: DummyResponse(html))
-    monkeypatch.setattr("icrawler.crawler.download_file", lambda url, out: None)
-    monkeypatch.setattr("icrawler.crawler.save_page_as_pdf", lambda url, out: None)
+    monkeypatch.setattr("pbc_regulations.icrawler.crawler.requests.get", lambda url: DummyResponse(html))
+    monkeypatch.setattr("pbc_regulations.icrawler.crawler.download_file", lambda url, out: None)
+    monkeypatch.setattr("pbc_regulations.icrawler.crawler.save_page_as_pdf", lambda url, out: None)
     sleeps = []
-    monkeypatch.setattr("icrawler.crawler.time.sleep", lambda s: sleeps.append(s))
-    monkeypatch.setattr("icrawler.crawler.random.uniform", lambda a, b: b)
+    monkeypatch.setattr("pbc_regulations.icrawler.crawler.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr("pbc_regulations.icrawler.crawler.random.uniform", lambda a, b: b)
     crawl(["http://example.com"], tmp_path, delay=1, jitter=0.5)
     assert sleeps == [1.5, 1.5]

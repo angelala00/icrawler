@@ -66,7 +66,9 @@ except Exception:  # pragma: no cover - optional dependency may be missing
     _pdf_extract_text = None
 
 try:
-    from icrawler.crawler import safe_filename as project_safe_filename  # type: ignore
+    from pbc_regulations.icrawler.crawler import (  # type: ignore
+        safe_filename as project_safe_filename,
+    )
 except Exception:  # pragma: no cover - fallback for standalone usage
     import unicodedata as _unicodedata
 
@@ -362,17 +364,18 @@ def pick_best_path(documents: List[Dict[str, Any]]) -> Optional[str]:
 
 
 def discover_project_root(start: Optional[Path] = None) -> Path:
-    """Return the repository root starting from ``start`` (or this file).
-
-    The search mimics the CLI fallback logic: walk up the directory tree and
-    look for ``pbc_config.json`` or the ``icrawler`` package.
-    """
+    """Return the project root, preferring config files over package folders."""
 
     base = Path(start) if start else Path(__file__).resolve().parent
+    package_match: Optional[Path] = None
     for candidate in [base, *base.parents]:
-        if (candidate / "pbc_config.json").exists() or (candidate / "icrawler").is_dir():
+        if (candidate / "pbc_config.json").exists():
             return candidate
-    return base
+        if package_match is None and any(
+            (candidate / name).is_dir() for name in ("pbc_regulations", "icrawler")
+        ):
+            package_match = candidate
+    return package_match or base
 
 
 def resolve_artifact_dir(project_root: Path) -> Path:

@@ -18,9 +18,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from icrawler.crawler import safe_filename
-from icrawler.export_titles import copy_documents_by_title
-from icrawler import pbc_monitor
+from pbc_regulations.icrawler.crawler import safe_filename
+from pbc_regulations.icrawler.export_titles import copy_documents_by_title
+from pbc_regulations.icrawler import pbc_monitor
 
 
 @dataclass
@@ -211,4 +211,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

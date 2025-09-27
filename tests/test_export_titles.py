@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from icrawler.export_titles import copy_documents_by_title
-from icrawler.state import PBCState, save_state
+from pbc_regulations.icrawler.export_titles import copy_documents_by_title
+from pbc_regulations.icrawler.state import PBCState, save_state
 
 
 def _write_state(state: PBCState, path: Path) -> None:
@@ -84,4 +84,3 @@ def test_copy_documents_by_title_dry_run(tmp_path):
     assert planned.source == source.resolve()
     assert planned.destination.name == "测试_文档.pdf"
     assert not destination.exists()
-

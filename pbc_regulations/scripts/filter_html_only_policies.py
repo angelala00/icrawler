@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Dict
 
-from searcher.policy_finder import (
+from pbc_regulations.searcher.policy_finder import (
     TaskConfig,
     canonicalize_task_name,
     default_state_path,

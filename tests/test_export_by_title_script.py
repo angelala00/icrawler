@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from icrawler.crawler import safe_filename
+from pbc_regulations.icrawler.crawler import safe_filename
 
 
 def test_export_by_title_script_invocation(tmp_path) -> None:

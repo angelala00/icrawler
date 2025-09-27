@@ -34,7 +34,7 @@ sys.modules["bs4"] = bs4_stub
 pdfkit_stub = types.SimpleNamespace(from_url=lambda *a, **k: None)
 sys.modules["pdfkit"] = pdfkit_stub
 
-from icrawler.crawler import safe_filename
+from pbc_regulations.icrawler.crawler import safe_filename
 
 
 def test_safe_filename():

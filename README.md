@@ -6,13 +6,13 @@ pages, downloading linked PDFs or rendering HTML pages to PDF files.
 
 ## Command Line Entrypoints
 
-### Unified portal (`python -m icrawler`)
+### Unified portal (`python -m pbc_regulations.icrawler`)
 
 Launch the combined monitoring portal – a FastAPI app that surfaces the live
 dashboard and the policy search interface in one place:
 
 ```
-python -m icrawler --host 0.0.0.0 --port 8000
+python -m pbc_regulations.icrawler --host 0.0.0.0 --port 8000
 ```
 
 By default the portal reads tasks from `pbc_config.json` and auto-refreshes
@@ -33,19 +33,19 @@ every 30 seconds. Useful options:
 
 When the portal detects that the required state files are missing it keeps the
 search tab visible but shows a message explaining why it is disabled. This
-command is equivalent to the old `python -m icrawler.dashboard` behaviour.
+command replaces the old `python -m icrawler.dashboard` entrypoint.
 
-### PDF crawler (`python -m icrawler.crawler`)
+### PDF crawler (`python -m pbc_regulations.icrawler.crawler`)
 
 ```
-python -m icrawler.crawler [--delay N] [--jitter M] <output_dir> <url1> [<url2> ...]
+python -m pbc_regulations.icrawler.crawler [--delay N] [--jitter M] <output_dir> <url1> [<url2> ...]
 ```
 
 `--delay` sets the base pause between requests, and `--jitter` adds up to that
 many random seconds so servers are not hammered. Install the dependencies from
 `requirements.txt` before running.
 
-### Policy text extractor (`python -m extractor.extract_policy_texts`)
+### Policy text extractor (`python -m pbc_regulations.extractor.extract_policy_texts`)
 
 Generate plain-text `.txt` files for every entry found in a task's
 `state.json`. Provide the state file explicitly or let the tool auto-discover
@@ -53,10 +53,10 @@ every configured task in `pbc_config.json`:
 
 ```
 # Process a single state file
-python -m extractor.extract_policy_texts artifacts/downloads/task_state.json --save-updated-state --summary summaries/task.json
+python -m pbc_regulations.extractor.extract_policy_texts artifacts/downloads/task_state.json --save-updated-state --summary summaries/task.json
 
 # Auto-discover every task defined in pbc_config.json
-python -m extractor.extract_policy_texts --save-updated-state --summary summaries/
+python -m pbc_regulations.extractor.extract_policy_texts --save-updated-state --summary summaries/
 ```
 
 When auto-discovery is used the extractor writes each task's output beneath
@@ -66,7 +66,7 @@ tasks or `--artifact-dir` / `--config` to point at alternative locations.
 
 ## PBC Monitor Quick Start
 
-`icrawler.pbc_monitor` loads tasks from `pbc_config.json` (multi-task configs are
+`pbc_regulations.icrawler.pbc_monitor` loads tasks from `pbc_config.json` (multi-task configs are
 supported). Minimal example:
 
 ```json
@@ -76,7 +76,7 @@ supported). Minimal example:
     {
       "name": "zhengwugongkai_administrative_normative_documents",
       "start_url": "http://www.pbc.gov.cn/.../index.html",
-      "parser": "icrawler.parser_policy"
+      "parser": "pbc_regulations.icrawler.parser_policy"
     }
   ]
 }
@@ -84,22 +84,22 @@ supported). Minimal example:
 
 Common commands (CLI flags override config fields):
 
-- `python -m icrawler.pbc_monitor --cache-start-page` – cache the starting page
+- `python -m pbc_regulations.icrawler.pbc_monitor --cache-start-page` – cache the starting page
   HTML (reuses the cached file unless you add `--refresh-pages`; pass `-` to
   stream to stdout).
-- `python -m icrawler.pbc_monitor --preview-page-structure` – parse a cached
+- `python -m pbc_regulations.icrawler.pbc_monitor --preview-page-structure` – parse a cached
   page and preview its extracted entries (defaults to the file produced by
   `--cache-start-page`).
-- `python -m icrawler.pbc_monitor --cache-listing` – cache every listing page
+- `python -m pbc_regulations.icrawler.pbc_monitor --cache-listing` – cache every listing page
   under `artifacts/pages/<task>/` (reuses existing cached pages and only fetches
   missing ones unless you pass `--refresh-pages` / `--no-use-cached-pages`).
-- `python -m icrawler.pbc_monitor --build-page-structure` – build a full
+- `python -m pbc_regulations.icrawler.pbc_monitor --build-page-structure` – build a full
   listing snapshot. Cached HTML is reused by default.
 - `--no-use-cached-pages` / `--refresh-pages` – force retrieval of fresh listing
   pages even when cached copies exist.
-- `python -m icrawler.pbc_monitor --download-from-structure` – download
+- `python -m pbc_regulations.icrawler.pbc_monitor --download-from-structure` – download
   attachments from an existing snapshot without recrawling listing pages.
-- `python -m icrawler.pbc_monitor --run-once` – single monitoring pass that
+- `python -m pbc_regulations.icrawler.pbc_monitor --run-once` – single monitoring pass that
   fetches listing pages online and downloads new attachments. If the
   starting listing page was cached earlier the same day, the cached copy is
   reused to avoid redundant network requests; older caches trigger a fresh
@@ -114,16 +114,16 @@ Common commands (CLI flags override config fields):
 
 1. Define tasks in `pbc_config.json` (single-task JSON is also accepted).
 2. Cache the first page for inspection:
-   `python -m icrawler.pbc_monitor --cache-start-page`.
+   `python -m pbc_regulations.icrawler.pbc_monitor --cache-start-page`.
 3. Preview that page offline:
-   `python -m icrawler.pbc_monitor --preview-page-structure`.
+   `python -m pbc_regulations.icrawler.pbc_monitor --preview-page-structure`.
 4. Cache the full listing once (reuses existing cached pages by default):
-   `python -m icrawler.pbc_monitor --cache-listing`.
+   `python -m pbc_regulations.icrawler.pbc_monitor --cache-listing`.
 5. Build the full structure snapshot:
-   `python -m icrawler.pbc_monitor --build-page-structure`.
+   `python -m pbc_regulations.icrawler.pbc_monitor --build-page-structure`.
    Add `--refresh-pages` or `--no-use-cached-pages` if you need to bypass cached HTML.
 6. Download attachments based on the snapshot:
-   `python -m icrawler.pbc_monitor --download-from-structure`.
+   `python -m pbc_regulations.icrawler.pbc_monitor --download-from-structure`.
    Alternatively run `--run-once` (or loop without `--run-once`) for an online
    crawl that fetches fresh pages and downloads files in one go.
 
@@ -142,18 +142,18 @@ State tracking and structure snapshots also adopt per-task defaults:
 You can override these via config (`state_file` / `structure_file`) or CLI
 (`--state-file`, `--build-page-structure`, `--download-from-structure`).
 
-### Monitoring dashboard (`python -m icrawler.dashboard`)
+### Monitoring dashboard (`python -m pbc_regulations.icrawler.dashboard`)
 
 Run the streamlined status board without the search tab:
 
 ```
-python -m icrawler.dashboard
+python -m pbc_regulations.icrawler.dashboard
 ```
 
 This entry point only serves the monitoring metrics (task progress, download
 counts, cache freshness, scheduling windows, etc.) and exposes the same
 `/api/tasks` JSON endpoint for automation. Search is intentionally disabled
-here – use the unified portal (`python -m icrawler`) if you need the embedded
+here – use the unified portal (`python -m pbc_regulations.icrawler`) if you need the embedded
 policy finder.
 
 Useful flags:
@@ -177,12 +177,12 @@ absolute path to opt out. Adjust the root via `--artifact-dir` or the config.
 
 ## Policy Finder API
 
-The fuzzy policy search helper located in `searcher/policy_finder.py` can be
+The fuzzy policy search helper located in `pbc_regulations/searcher/policy_finder.py` can be
 exposed over HTTP for integration with other services. Start the API server
 with:
 
 ```
-python -m searcher.api_server --host 0.0.0.0 --port 8001
+python -m pbc_regulations.searcher.api_server --host 0.0.0.0 --port 8001
 ```
 
 By default the server automatically locates every task defined in

@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
-    from icrawler import pbc_monitor
+    from pbc_regulations.icrawler import pbc_monitor
 except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency guard
     if exc.name != "bs4":
         raise
@@ -34,7 +34,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency gua
     bs4_stub.NavigableString = NavigableString
     bs4_stub.Tag = Tag
     sys.modules["bs4"] = bs4_stub
-    from icrawler import pbc_monitor
+    from pbc_regulations.icrawler import pbc_monitor
 
 
 def _abs_path(path: Path) -> Path:

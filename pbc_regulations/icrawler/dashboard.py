@@ -435,7 +435,7 @@ def render_dashboard_html(
         if search_config is not None
         else {
             "enabled": False,
-            "reason": "Search is available from the combined portal via `python -m icrawler`.",
+            "reason": "Search is available from the combined portal via `python -m pbc_regulations.icrawler`.",
         }
     )
     return _render_index_html(
@@ -723,7 +723,7 @@ def main(argv: Optional[List[str]] = None) -> None:
 
     disabled_search_config = {
         "enabled": False,
-        "reason": "Search is available from the combined portal via `python -m icrawler`.",
+        "reason": "Search is available from the combined portal via `python -m pbc_regulations.icrawler`.",
     }
 
     if args.once and args.json:

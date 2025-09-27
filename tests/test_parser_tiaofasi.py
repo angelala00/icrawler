@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from bs4 import BeautifulSoup
 
-from icrawler import parser_tiaofasi
+from pbc_regulations.icrawler import parser_tiaofasi
 
 
 BASE_URL = "http://www.pbc.gov.cn/tiaofasi/144941/144951/index.html"

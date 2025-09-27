@@ -8,9 +8,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
-from icrawler import pbc_monitor
-from icrawler.crawler import safe_filename
-from icrawler.text_pipeline import EntryTextRecord, ProcessReport, process_state_data
+from pbc_regulations.icrawler import pbc_monitor
+from pbc_regulations.icrawler.crawler import safe_filename
+from pbc_regulations.icrawler.text_pipeline import (
+    EntryTextRecord,
+    ProcessReport,
+    process_state_data,
+)
 
 
 def _default_output_state_path(state_path: Path) -> Path:

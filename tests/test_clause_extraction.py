@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from searcher.policy_finder import (  # noqa: E402
+from pbc_regulations.searcher.policy_finder import (  # noqa: E402
     Entry,
     extract_clause_from_entry,
     parse_clause_reference,

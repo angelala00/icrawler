@@ -15,8 +15,8 @@ from bs4 import BeautifulSoup
 pdfkit_stub = types.SimpleNamespace(from_url=lambda *a, **k: None)
 sys.modules.setdefault("pdfkit", pdfkit_stub)
 
-from icrawler import pbc_monitor
-from icrawler import parser as parser_module
+from pbc_regulations.icrawler import pbc_monitor
+from pbc_regulations.icrawler import parser as parser_module
 
 
 def _make_soup(html: str) -> BeautifulSoup:

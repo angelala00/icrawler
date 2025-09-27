@@ -8,15 +8,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-import icrawler.dashboard as base_dashboard
-from icrawler.dashboard import (
+from pbc_regulations.icrawler import dashboard as base_dashboard
+from pbc_regulations.icrawler.dashboard import (
     collect_task_overviews,
     create_dashboard_app,
     render_dashboard_html,
 )
-from searcher.api_server import create_policy_router
-from searcher.clause_lookup import ClauseLookup
-from searcher.policy_finder import (
+from pbc_regulations.searcher.api_server import create_policy_router
+from pbc_regulations.searcher.clause_lookup import ClauseLookup
+from pbc_regulations.searcher.policy_finder import (
     Entry,
     PolicyFinder,
     TaskConfig,
