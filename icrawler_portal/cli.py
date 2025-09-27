@@ -14,6 +14,8 @@ from icrawler.dashboard import (
     create_dashboard_app,
     render_dashboard_html,
 )
+from searcher.api_server import create_policy_router
+from searcher.clause_lookup import ClauseLookup
 from searcher.policy_finder import (
     Entry,
     PolicyFinder,
@@ -25,6 +27,7 @@ from searcher.policy_finder import (
     ZHENGWUGONGKAI_ADMINISTRATIVE_NORMATIVE_DOCUMENTS,
     ZHENGWUGONGKAI_CHINESE_REGULATIONS,
     canonicalize_task_name,
+    default_extract_path,
     default_state_path,
     discover_project_root,
     load_configured_tasks,
@@ -121,9 +124,9 @@ def _prepare_policy_finder(
     config_path: str,
     disable_search: bool,
     state_overrides: Dict[str, str],
-) -> Tuple[Optional[PolicyFinder], Optional[str]]:
+) -> Tuple[Optional[PolicyFinder], Optional[ClauseLookup], Optional[str]]:
     if disable_search:
-        return None, "Search disabled by configuration"
+        return None, None, "Search disabled by configuration"
 
     overrides = dict(state_overrides)
 
@@ -157,14 +160,22 @@ def _prepare_policy_finder(
             missing.append(str(resolved))
 
     if missing:
-        return None, "Missing search state file(s): " + ", ".join(missing)
+        return None, None, "Missing search state file(s): " + ", ".join(missing)
 
     try:
         finder = PolicyFinder(*(str(path) for path in resolved_paths))
     except Exception as exc:  # pragma: no cover - defensive
-        return None, f"Failed to load search index: {exc}"
+        return None, None, f"Failed to load search index: {exc}"
 
-    return finder, None
+    script_dir = Path(__file__).resolve().parent
+    resolved_extract_paths = [default_extract_path(task.name, script_dir) for task in task_configs]
+
+    try:
+        clause_lookup = ClauseLookup(resolved_extract_paths)
+    except Exception as exc:  # pragma: no cover - defensive
+        return finder, None, f"Failed to load clause lookup: {exc}"
+
+    return finder, clause_lookup, None
 
 
 def _coerce_search_topk(
@@ -224,6 +235,7 @@ def _serve_portal(
     task: Optional[str],
     artifact_dir_override: Optional[str],
     policy_finder: Optional[PolicyFinder],
+    clause_lookup: Optional[ClauseLookup],
     search_settings: Dict[str, object],
 ) -> None:
     if JSONResponse is None or Request is None or uvicorn is None:
@@ -254,12 +266,28 @@ def _serve_portal(
     if policy_finder is None and isinstance(search_reason, str):
         search_config_payload["reason"] = search_reason
 
+    extra_routers: List[Tuple[object, Dict[str, Any]]] = []
+    if policy_finder is not None:
+
+        def _portal_finder_dependency() -> PolicyFinder:
+            return policy_finder
+
+        def _portal_clause_dependency() -> Optional[ClauseLookup]:
+            return clause_lookup
+
+        policy_router = create_policy_router(
+            finder_dependency=_portal_finder_dependency,
+            clause_lookup_dependency=_portal_clause_dependency,
+        )
+        extra_routers.append((policy_router, {"prefix": "/api"}))
+
     app = create_dashboard_app(
         config_path,
         auto_refresh=auto_refresh,
         task=task,
         artifact_dir_override=artifact_dir_override,
         search_config=search_config_payload,
+        extra_routers=extra_routers,
     )
 
     search_finder = policy_finder
@@ -493,13 +521,23 @@ def main(argv: Optional[List[str]] = None) -> None:
                 canonicalize_task_name(definition["name"])
             ] = override_value
 
-    policy_finder, search_error = _prepare_policy_finder(
+    policy_finder, clause_lookup, search_error = _prepare_policy_finder(
         config_path=config_path,
         disable_search=args.disable_search,
         state_overrides=search_state_overrides,
     )
-    if search_error and not args.disable_search:
-        print(f"[portal] Search interface disabled: {search_error}", file=sys.stderr)
+    if search_error:
+        if policy_finder is None:
+            if not args.disable_search:
+                print(
+                    f"[portal] Search interface disabled: {search_error}",
+                    file=sys.stderr,
+                )
+        else:
+            print(
+                f"[portal] Search interface warning: {search_error}",
+                file=sys.stderr,
+            )
 
     _serve_portal(
         config_path,
@@ -509,6 +547,7 @@ def main(argv: Optional[List[str]] = None) -> None:
         task=args.task,
         artifact_dir_override=args.artifact_dir,
         policy_finder=policy_finder,
+        clause_lookup=clause_lookup,
         search_settings={
             "default_topk": search_default_topk,
             "max_topk": search_max_topk,

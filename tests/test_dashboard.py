@@ -253,3 +253,26 @@ def test_entries_page_includes_search_config(tmp_path) -> None:
     config_payload = json.loads(match.group(1))
     assert config_payload["search"] == search_config
 
+
+def test_api_explorer_includes_search_config(tmp_path) -> None:
+    config_path, _, _ = _prepare_dashboard_environment(tmp_path)
+
+    search_config = {"enabled": True, "endpoint": "/api/search"}
+
+    app = create_dashboard_app(
+        str(config_path),
+        auto_refresh=30,
+        task=None,
+        artifact_dir_override=None,
+        search_config=search_config,
+    )
+
+    explorer_route = _get_app_route(app, "/api-explorer.html", "GET")
+    response = explorer_route.endpoint()
+    assert response.status_code == 200
+    html = response.body.decode("utf-8")
+
+    match = re.search(r"window\.__PBC_CONFIG__ = (.*?)</script>", html, re.DOTALL)
+    assert match is not None
+    config_payload = json.loads(match.group(1))
+    assert config_payload["search"] == search_config

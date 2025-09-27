@@ -11,7 +11,7 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from . import pbc_monitor as core
 from .crawler import safe_filename
@@ -25,7 +25,7 @@ from .runner import (
 from .state import PBCState
 
 try:  # pragma: no cover - optional dependency during import
-    from fastapi import FastAPI, HTTPException, Query, Request
+    from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
     import uvicorn
@@ -344,6 +344,10 @@ def _cached_entries_template() -> str:
     return _cached_template("entries.html")
 
 
+def _cached_api_explorer_template() -> str:
+    return _cached_template("api-explorer.html")
+
+
 def _render_template_with_config(template: str, config: Dict[str, object]) -> str:
     config_script = (
         "<script>window.__PBC_CONFIG__ = "
@@ -395,6 +399,27 @@ def _render_entries_html(
     return _render_template_with_config(template, config)
 
 
+def _render_api_explorer_html(
+    *,
+    generated_at: datetime,
+    static_snapshot: bool = False,
+    api_base: str = "",
+    search_config: Optional[Dict[str, object]] = None,
+    explorer_config: Optional[Dict[str, object]] = None,
+) -> str:
+    template = _cached_api_explorer_template()
+    config: Dict[str, object] = {
+        "generatedAt": generated_at.isoformat(timespec="seconds"),
+        "staticSnapshot": static_snapshot,
+        "apiBase": api_base,
+    }
+    if search_config is not None:
+        config["search"] = search_config
+    if explorer_config is not None:
+        config["apiExplorer"] = explorer_config
+    return _render_template_with_config(template, config)
+
+
 def render_dashboard_html(
     overviews: Iterable[TaskOverview],
     *,
@@ -429,6 +454,7 @@ def create_dashboard_app(
     task: Optional[str],
     artifact_dir_override: Optional[str],
     search_config: Optional[Dict[str, object]] = None,
+    extra_routers: Optional[Sequence[Tuple[Any, Dict[str, Any]]]] = None,
 ):
     if (
         FastAPI is None
@@ -575,6 +601,18 @@ def create_dashboard_app(
             return HTMLResponse(message, status_code=500)
         return HTMLResponse(html)
 
+    def _render_api_explorer_response() -> HTMLResponse:
+        try:
+            html = _render_api_explorer_html(
+                generated_at=datetime.now(),
+                api_base="",
+                search_config=search_payload,
+            )
+        except FileNotFoundError as exc:  # pragma: no cover - configuration issue
+            message = f"Dashboard error: {exc}"
+            return HTMLResponse(message, status_code=500)
+        return HTMLResponse(html)
+
     @app.get("/")
     def index() -> HTMLResponse:
         return _render_index_response()
@@ -590,6 +628,21 @@ def create_dashboard_app(
     @app.get("/entries.html")
     def entries_html() -> HTMLResponse:
         return _render_entries_response()
+
+    @app.get("/api-explorer")
+    def api_explorer_page() -> HTMLResponse:
+        return _render_api_explorer_response()
+
+    @app.get("/api-explorer.html")
+    def api_explorer_html() -> HTMLResponse:
+        return _render_api_explorer_response()
+
+    if extra_routers:
+        for router, options in extra_routers:
+            if not router:
+                continue
+            include_kwargs = dict(options) if isinstance(options, dict) else {}
+            app.include_router(router, **include_kwargs)
 
     @app.get("/{resource_path:path}", include_in_schema=False)
     def serve_static(resource_path: str) -> FileResponse:
@@ -702,4 +755,3 @@ def main(argv: Optional[List[str]] = None) -> None:
 
 if __name__ == "__main__":
     main()
-

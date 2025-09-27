@@ -25,10 +25,10 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
@@ -218,6 +218,199 @@ def _search_payload(
     return response
 
 
+def _parse_include_params(values: Optional[Sequence[str]]) -> List[str]:
+    includes: List[str] = []
+    if not values:
+        return includes
+    for value in values:
+        if value is None:
+            continue
+        for part in str(value).split(","):
+            normalized = part.strip().lower()
+            if normalized:
+                includes.append(normalized)
+    return includes
+
+
+def create_policy_router(
+    *,
+    finder_dependency: Callable[..., PolicyFinder],
+    clause_lookup_dependency: Optional[Callable[..., Optional[ClauseLookup]]],
+) -> APIRouter:
+    """Return a router exposing policy catalog and clause lookup endpoints."""
+
+    router = APIRouter()
+
+    def bad_request(message: str) -> JSONResponse:
+        LOGGER.debug("Bad request: %s", message)
+        return JSONResponse(status_code=400, content={"error": message})
+
+    if clause_lookup_dependency is None:
+
+        def _get_optional_clause_lookup() -> Optional[ClauseLookup]:
+            return None
+
+        def _require_clause_lookup() -> ClauseLookup:
+            raise HTTPException(status_code=503, detail="clause_lookup_unavailable")
+
+    else:
+
+        def _get_optional_clause_lookup(
+            lookup: ClauseLookup = Depends(clause_lookup_dependency),
+        ) -> Optional[ClauseLookup]:
+            return lookup
+
+        def _require_clause_lookup(
+            lookup: ClauseLookup = Depends(clause_lookup_dependency),
+        ) -> ClauseLookup:
+            return lookup
+
+    @router.get("/policies")
+    def list_policies(
+        query: Optional[str] = Query(None),
+        finder_instance: PolicyFinder = Depends(finder_dependency),
+        clause_lookup_instance: Optional[ClauseLookup] = Depends(_get_optional_clause_lookup),
+    ) -> JSONResponse:
+        if query:
+            matched = finder_instance.keyword_search(query, clause_lookup_instance)
+            entries = [entry for entry, _exact, _hits, _content in matched]
+        else:
+            entries = sorted(
+                finder_instance.all_entries(),
+                key=lambda e: e.norm_title or e.title,
+            )
+
+        payload: Dict[str, Any] = {
+            "policies": [entry.to_dict(include_documents=False) for entry in entries],
+            "result_count": len(entries),
+        }
+        if query:
+            payload["query"] = query
+        return JSONResponse(status_code=200, content=payload)
+
+    @router.get("/policies/{policy_id}")
+    def get_policy(
+        policy_id: str,
+        include: Optional[List[str]] = Query(None),
+        finder_instance: PolicyFinder = Depends(finder_dependency),
+        clause_lookup_instance: Optional[ClauseLookup] = Depends(_get_optional_clause_lookup),
+    ) -> JSONResponse:
+        entry = finder_instance.find_entry(policy_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="policy_not_found")
+
+        include_params = set(_parse_include_params(include))
+        if not include_params:
+            include_params.add("meta")
+        if "all" in include_params:
+            include_params.update({"meta", "text", "outline"})
+            include_params.discard("all")
+
+        response_payload: Dict[str, Any] = {}
+        if "meta" in include_params:
+            response_payload["policy"] = entry.to_dict(include_documents=False)
+
+        text_content: Optional[str] = None
+        if include_params & {"text", "outline"}:
+            text_content = finder_instance.get_entry_text(entry, clause_lookup_instance)
+            if text_content is None:
+                raise HTTPException(status_code=404, detail="policy_text_not_available")
+
+        if "text" in include_params and text_content is not None:
+            response_payload["text"] = text_content
+
+        if "outline" in include_params and text_content is not None:
+            response_payload["outline"] = build_outline_from_text(text_content)
+
+        return JSONResponse(status_code=200, content=response_payload)
+
+    def _resolve_clause_arguments(payload: Mapping[str, Any]) -> Tuple[str, str]:
+        title_value = payload.get("title") or payload.get("policy")
+        clause_value = (
+            payload.get("item")
+            or payload.get("clause")
+            or payload.get("article")
+        )
+        title_text = title_value.strip() if isinstance(title_value, str) else ""
+        clause_text = clause_value.strip() if isinstance(clause_value, str) else ""
+        return title_text, clause_text
+
+    def _lookup_clause_response(
+        title_text: str, clause_text: str, lookup: ClauseLookup
+    ) -> JSONResponse:
+        match, error_code = lookup.find_clause(title_text, clause_text)
+        if match is None:
+            status_map = {
+                "missing_title": 400,
+                "invalid_clause_reference": 400,
+                "policy_not_found": 404,
+            }
+            status = status_map.get(error_code or "", 404)
+            message = error_code or "clause_lookup_failed"
+            return JSONResponse(status_code=status, content={"error": message})
+
+        result_payload = match.result.to_dict()
+        clause_text_value = (
+            result_payload.get("item_text")
+            or result_payload.get("paragraph_text")
+            or result_payload.get("article_text")
+        )
+        response_payload: Dict[str, Any] = {
+            "query": {
+                "title": title_text,
+                "clause": clause_text,
+            },
+            "policy": match.entry.to_payload(),
+            "result": result_payload,
+        }
+        if clause_text_value:
+            response_payload["clause_text"] = clause_text_value
+        if error_code and not clause_text_value:
+            response_payload["error"] = error_code
+            return JSONResponse(status_code=404, content=response_payload)
+        if error_code:
+            response_payload["warning"] = error_code
+        return JSONResponse(status_code=200, content=response_payload)
+
+    @router.get("/clause")
+    def clause_get(
+        title: Optional[str] = Query(None),
+        item: Optional[str] = Query(None),
+        clause: Optional[str] = Query(None),
+        article: Optional[str] = Query(None),
+        lookup: ClauseLookup = Depends(_require_clause_lookup),
+    ) -> JSONResponse:
+        title_text = title.strip() if isinstance(title, str) else ""
+        clause_candidate = item or clause or article
+        clause_text = clause_candidate.strip() if isinstance(clause_candidate, str) else ""
+        if not title_text or not clause_text:
+            return bad_request(
+                "Parameters 'title' and 'item' (or 'clause') are required"
+            )
+        return _lookup_clause_response(title_text, clause_text, lookup)
+
+    @router.post("/clause")
+    async def clause_post(
+        request: Request,
+        lookup: ClauseLookup = Depends(_require_clause_lookup),
+    ) -> JSONResponse:
+        body = await request.body()
+        if not body:
+            return bad_request("Empty request body")
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except json.JSONDecodeError:
+            return bad_request("Request body must be valid JSON")
+        if not isinstance(payload, dict):
+            return bad_request("Request body must be a JSON object")
+        title_text, clause_text = _resolve_clause_arguments(payload)
+        if not title_text or not clause_text:
+            return bad_request("Fields 'title' and 'item' (or 'clause') are required")
+        return _lookup_clause_response(title_text, clause_text, lookup)
+
+    return router
+
+
 def _parse_search_params(
     params: Mapping[str, Any],
     *,
@@ -362,157 +555,12 @@ def create_app(finder: PolicyFinder, clause_lookup: ClauseLookup) -> FastAPI:
         payload_data = _search_payload(finder_instance, query_text, topk_value, include_flag)
         return JSONResponse(status_code=200, content=payload_data)
 
-    def _parse_include_params(values: Optional[Sequence[str]]) -> List[str]:
-        includes: List[str] = []
-        if not values:
-            return includes
-        for value in values:
-            if value is None:
-                continue
-            for part in str(value).split(","):
-                normalized = part.strip().lower()
-                if normalized:
-                    includes.append(normalized)
-        return includes
-
-    @app.get("/policies")
-    def list_policies(
-        query: Optional[str] = Query(None),
-        finder_instance: PolicyFinder = Depends(get_finder),
-        clause_lookup_instance: ClauseLookup = Depends(get_clause_lookup),
-    ) -> JSONResponse:
-        if query:
-            matched = finder_instance.keyword_search(query, clause_lookup_instance)
-            entries = [entry for entry, _exact, _hits, _content in matched]
-        else:
-            entries = sorted(
-                finder_instance.all_entries(),
-                key=lambda e: e.norm_title or e.title,
-            )
-
-        payload: Dict[str, Any] = {
-            "policies": [entry.to_dict(include_documents=False) for entry in entries],
-            "result_count": len(entries),
-        }
-        if query:
-            payload["query"] = query
-        return JSONResponse(status_code=200, content=payload)
-
-    @app.get("/policies/{policy_id}")
-    def get_policy(
-        policy_id: str,
-        include: Optional[List[str]] = Query(None),
-        finder_instance: PolicyFinder = Depends(get_finder),
-        clause_lookup_instance: ClauseLookup = Depends(get_clause_lookup),
-    ) -> JSONResponse:
-        entry = finder_instance.find_entry(policy_id)
-        if entry is None:
-            raise HTTPException(status_code=404, detail="policy_not_found")
-
-        include_params = set(_parse_include_params(include))
-        if not include_params:
-            include_params.add("meta")
-        if "all" in include_params:
-            include_params.update({"meta", "text", "outline"})
-            include_params.discard("all")
-
-        response_payload: Dict[str, Any] = {}
-        if "meta" in include_params:
-            response_payload["policy"] = entry.to_dict(include_documents=False)
-
-        text_content: Optional[str] = None
-        if include_params & {"text", "outline"}:
-            text_content = finder_instance.get_entry_text(entry, clause_lookup_instance)
-            if text_content is None:
-                raise HTTPException(status_code=404, detail="policy_text_not_available")
-
-        if "text" in include_params and text_content is not None:
-            response_payload["text"] = text_content
-
-        if "outline" in include_params and text_content is not None:
-            response_payload["outline"] = build_outline_from_text(text_content)
-
-        return JSONResponse(status_code=200, content=response_payload)
-
-    def _resolve_clause_arguments(payload: Mapping[str, Any]) -> Tuple[str, str]:
-        title_value = payload.get("title") or payload.get("policy")
-        clause_value = (
-            payload.get("item")
-            or payload.get("clause")
-            or payload.get("article")
+    app.include_router(
+        create_policy_router(
+            finder_dependency=get_finder,
+            clause_lookup_dependency=get_clause_lookup,
         )
-        title_text = title_value.strip() if isinstance(title_value, str) else ""
-        clause_text = clause_value.strip() if isinstance(clause_value, str) else ""
-        return title_text, clause_text
-
-    def _lookup_clause_response(title_text: str, clause_text: str, lookup: ClauseLookup) -> JSONResponse:
-        match, error_code = lookup.find_clause(title_text, clause_text)
-        if match is None:
-            status_map = {
-                "missing_title": 400,
-                "invalid_clause_reference": 400,
-                "policy_not_found": 404,
-            }
-            status = status_map.get(error_code or "", 404)
-            message = error_code or "clause_lookup_failed"
-            return JSONResponse(status_code=status, content={"error": message})
-
-        result_payload = match.result.to_dict()
-        clause_text_value = (
-            result_payload.get("item_text")
-            or result_payload.get("paragraph_text")
-            or result_payload.get("article_text")
-        )
-        response_payload: Dict[str, Any] = {
-            "query": {
-                "title": title_text,
-                "clause": clause_text,
-            },
-            "policy": match.entry.to_payload(),
-            "result": result_payload,
-        }
-        if clause_text_value:
-            response_payload["clause_text"] = clause_text_value
-        if error_code and not clause_text_value:
-            response_payload["error"] = error_code
-            return JSONResponse(status_code=404, content=response_payload)
-        if error_code:
-            response_payload["warning"] = error_code
-        return JSONResponse(status_code=200, content=response_payload)
-
-    @app.get("/clause")
-    def clause_get(
-        title: Optional[str] = Query(None),
-        item: Optional[str] = Query(None),
-        clause: Optional[str] = Query(None),
-        article: Optional[str] = Query(None),
-        lookup: ClauseLookup = Depends(get_clause_lookup),
-    ) -> JSONResponse:
-        title_text = title.strip() if isinstance(title, str) else ""
-        clause_candidate = item or clause or article
-        clause_text = clause_candidate.strip() if isinstance(clause_candidate, str) else ""
-        if not title_text or not clause_text:
-            return bad_request("Parameters 'title' and 'item' (or 'clause') are required")
-        return _lookup_clause_response(title_text, clause_text, lookup)
-
-    @app.post("/clause")
-    async def clause_post(
-        request: Request,
-        lookup: ClauseLookup = Depends(get_clause_lookup),
-    ) -> JSONResponse:
-        body = await request.body()
-        if not body:
-            return bad_request("Empty request body")
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except json.JSONDecodeError:
-            return bad_request("Request body must be valid JSON")
-        if not isinstance(payload, dict):
-            return bad_request("Request body must be a JSON object")
-        title_text, clause_text = _resolve_clause_arguments(payload)
-        if not title_text or not clause_text:
-            return bad_request("Fields 'title' and 'item' (or 'clause') are required")
-        return _lookup_clause_response(title_text, clause_text, lookup)
+    )
 
     return app
 
