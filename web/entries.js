@@ -5,7 +5,7 @@
 
   const generatedAtEls = document.querySelectorAll("[data-generated-at]");
   const titleEl = document.getElementById("entries-title");
-  const subtitleEl = document.getElementById("entries-subtitle");
+  const summaryEl = document.getElementById("entries-summary");
   const metaEl = document.getElementById("entries-meta");
   const messageEl = document.getElementById("entries-message");
   const bodyEl = document.getElementById("entries-body");
@@ -915,7 +915,7 @@
       titleEl.textContent = name || "条目详情";
     }
     document.title = name ? `${name} · 条目详情` : "任务条目详情";
-    if (subtitleEl) {
+    if (summaryEl) {
       const parts = [];
       if (slugDisplay) {
         parts.push(`任务标识 ${slugDisplay}`);
@@ -931,7 +931,7 @@
       if (entriesCount !== null && entriesCount !== "") {
         parts.push(`条目数 ${entriesCount}`);
       }
-      subtitleEl.textContent = parts.join(" · ");
+      summaryEl.textContent = parts.length ? parts.join(" · ") : "—";
     }
   }
 
@@ -985,11 +985,13 @@
         entriesForHeader = cached.entries;
       }
       updateHeader(task, entriesForHeader);
-      if (filterActive && subtitleEl && filteredCount !== totalEntriesCount) {
+      if (filterActive && summaryEl && filteredCount !== totalEntriesCount) {
         const suffix = `筛选后 ${filteredCount} 条目`;
-        subtitleEl.textContent = subtitleEl.textContent
-          ? `${subtitleEl.textContent} · ${suffix}`
-          : suffix;
+        const baseText =
+          summaryEl.textContent && summaryEl.textContent !== "—"
+            ? summaryEl.textContent
+            : "";
+        summaryEl.textContent = baseText ? `${baseText} · ${suffix}` : suffix;
       }
       updateMeta(task, cached && Array.isArray(cached.entries) ? cached.entries : []);
       if (metaEl && filterActive) {
@@ -1008,7 +1010,7 @@
     }
     document.title = "任务条目详情";
 
-    if (subtitleEl) {
+    if (summaryEl) {
       const tasksLabel = activeSlugs.length
         ? `已选 ${activeSlugs.length} 个任务`
         : "全部任务";
@@ -1016,7 +1018,7 @@
       if (filterActive && filteredCount !== totalEntriesCount) {
         entriesPart = `条目数 ${filteredCount}/${totalEntriesCount}`;
       }
-      subtitleEl.textContent = `${tasksLabel} · ${entriesPart}`;
+      summaryEl.textContent = `${tasksLabel} · ${entriesPart}`;
     }
 
     if (metaEl) {

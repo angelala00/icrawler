@@ -8,17 +8,23 @@
     <!--CONFIG_PLACEHOLDER-->
   </head>
   <body class="entries-page">
-    <header class="entries-header">
-      <div class="entries-header__top app-header__top">
-        <span class="entries-header__meta">数据生成时间 <span data-generated-at>—</span></span>
+    <header class="app-header entries-header">
+      <div class="app-header__top entries-header__top">
+        <h1 class="entries-header__title" id="entries-title">条目详情</h1>
         <a
           href="index.html"
           class="app-header__entries-link entries-header__back"
           id="entries-back-link"
         >返回仪表盘</a>
       </div>
-      <h1 class="entries-header__title" id="entries-title">条目详情</h1>
-      <p class="entries-header__subtitle" id="entries-subtitle"></p>
+      <p class="entries-header__meta">数据生成时间 <span data-generated-at>—</span></p>
+      <p
+        class="entries-header__summary"
+        id="entries-summary"
+        aria-live="polite"
+      >
+        已选 — 个任务 · 条目数 —
+      </p>
     </header>
     <main class="entries-main">
       <div class="entries-container">
