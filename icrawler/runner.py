@@ -190,7 +190,7 @@ def _prepare_task_layout(
         build_target = core._resolve_artifact_path(
             build_source,
             artifact_dir,
-            "structure",
+            "pages",
             default_basename=default_structure_filename,
         )
 
@@ -208,7 +208,7 @@ def _prepare_task_layout(
         download_target = core._resolve_artifact_path(
             download_source,
             artifact_dir,
-            "structure",
+            "pages",
             default_basename=default_structure_filename,
         )
 
