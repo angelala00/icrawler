@@ -811,22 +811,28 @@ body.entries-page {
   font-size: 1.7rem;
 }
 
-.entries-header__meta,
-.entries-header__summary {
+.entries-header__meta {
   margin: 0;
   font-size: 0.95rem;
   color: rgba(255, 255, 255, 0.85);
 }
 
-.entries-header__meta,
-.entries-header__summary {
+.entries-header__meta {
   display: flex;
   align-items: center;
   gap: 0.45rem;
   flex-wrap: wrap;
 }
 
-.entries-header__summary {
+.entries-summary {
+  margin: 0;
+  padding: 1rem 1.5rem 0;
+  font-size: 0.95rem;
+  color: #475569;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
   min-height: 1.5em;
 }
 

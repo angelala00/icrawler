@@ -1,53 +1,49 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>任务条目详情</title>
+    <title>Task Entry Details</title>
     <link rel="stylesheet" href="style.css" />
     <!--CONFIG_PLACEHOLDER-->
   </head>
   <body class="entries-page">
     <header class="app-header entries-header">
       <div class="app-header__top entries-header__top">
-        <h1 class="entries-header__title" id="entries-title">条目详情</h1>
+        <h1 class="entries-header__title" id="entries-title">Entry details</h1>
         <a
           href="index.html"
           class="app-header__entries-link entries-header__back"
           id="entries-back-link"
-        >返回仪表盘</a>
+        >Back to dashboard</a>
       </div>
-      <p class="entries-header__meta">数据生成时间 <span data-generated-at>—</span></p>
-      <p
-        class="entries-header__summary"
-        id="entries-summary"
-        aria-live="polite"
-      >
-        已选 — 个任务 · 条目数 —
-      </p>
+      <p class="entries-header__meta">Generated at <span data-generated-at>—</span></p>
     </header>
+    <div class="entries-summary" id="entries-summary" aria-live="polite">
+      Selected — task(s) · Entries —
+    </div>
     <main class="entries-main">
       <div class="entries-container">
         <section class="entries-card">
           <div class="entries-card__meta" id="entries-meta"></div>
           <section class="search-panel entries-search" id="search-panel">
             <div class="search-panel__header">
-              <h2>政策检索</h2>
-              <p>查询已抓取任务中的政策条目，快速定位关键文档。</p>
+              <h2>Policy search</h2>
+              <p>Search captured tasks for policy entries and quickly locate key documents.</p>
             </div>
             <form id="search-form" class="search-form" autocomplete="off">
               <label class="field field--grow" for="search-query">
-                关键词
+                Keywords
                 <input
                   type="text"
                   id="search-query"
                   name="query"
-                  placeholder="请输入关键词，例如 金融监管"
+                  placeholder="Enter keywords, e.g. financial regulation"
                   required
                 />
               </label>
               <label class="field" for="search-topk">
-                返回数量
+                Results
                 <input
                   type="number"
                   id="search-topk"
@@ -64,31 +60,31 @@
                   name="include_documents"
                   checked
                 />
-                <span>包含文档详情</span>
+                <span>Include document details</span>
               </label>
-              <button type="submit" id="search-submit">开始检索</button>
+              <button type="submit" id="search-submit">Search</button>
             </form>
             <div class="message hidden" id="search-status"></div>
             <ol id="search-results" class="search-results">
-              <li class="empty">输入关键词后开始检索。</li>
+              <li class="empty">Enter keywords to start searching.</li>
             </ol>
           </section>
-          <section class="entries-filters hidden" id="entries-filters" aria-label="条目筛选">
+          <section class="entries-filters hidden" id="entries-filters" aria-label="Entry filters">
             <header class="entries-filters__header">
-              <h2>筛选条件</h2>
-              <p>点击标签快速筛选任务或特殊类型的条目。</p>
+              <h2>Filters</h2>
+              <p>Use tags to quickly filter tasks or highlight specific entry types.</p>
             </header>
             <div class="entries-filters__groups">
               <div class="entries-filters__group" id="entries-filter-slugs" aria-live="polite">
-                <span class="entries-filters__label">任务标识</span>
+                <span class="entries-filters__label">Task identifier</span>
                 <div class="entries-filters__tags" id="entries-slug-tags"></div>
-                <p class="entries-filters__hint">可多选；未选择任何标签时显示全部任务。</p>
+                <p class="entries-filters__hint">Select multiple tags to refine the view. Leaving all tags unselected shows every task.</p>
               </div>
               <div class="entries-filters__group">
-                <span class="entries-filters__label">条目类型</span>
+                <span class="entries-filters__label">Entry type</span>
                 <div class="entries-filters__tags">
                   <button type="button" class="entries-filter-tag" data-filter="abolish" id="entries-filter-abolish">
-                    包含“废止”的制度
+                    Include entries that mention “abolished”
                   </button>
                 </div>
               </div>
@@ -96,13 +92,13 @@
           </section>
           <div class="message hidden" id="entries-message"></div>
           <div class="entries-body" id="entries-body">
-            <p class="empty">正在加载条目…</p>
+            <p class="empty">Loading entries…</p>
           </div>
         </section>
       </div>
     </main>
     <footer class="entries-footer">
-      <a href="index.html" class="entries-footer__link">返回仪表盘首页</a>
+      <a href="index.html" class="entries-footer__link">Back to dashboard overview</a>
     </footer>
     <script src="entries.js" defer></script>
   </body>

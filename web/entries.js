@@ -71,7 +71,7 @@
   const searchIncludeDocumentsDefault =
     searchConfig.includeDocuments === false ? false : true;
   const searchDisabledReason = staticSnapshot
-    ? "静态快照模式下无法检索政策条目。"
+    ? "Policy search is unavailable in static snapshot mode."
     : typeof searchConfig.reason === "string"
     ? searchConfig.reason
     : "";
@@ -197,7 +197,7 @@
     if (!state.slugOptions.length) {
       const empty = document.createElement("p");
       empty.className = "entries-filters__hint";
-      empty.textContent = "暂无任务数据。";
+      empty.textContent = "No task data available.";
       slugFiltersContainer.appendChild(empty);
       return;
     }
@@ -361,7 +361,7 @@
     if (searchSubmitButton) {
       searchSubmitButton.disabled = Boolean(isLoading);
       searchSubmitButton.textContent = isLoading
-        ? "检索中…"
+        ? "Searching…"
         : searchSubmitLabel;
     }
     if (searchForm) {
@@ -375,17 +375,17 @@
     }
     if (!Array.isArray(results) || results.length === 0) {
       searchResultsList.innerHTML =
-        '<li class="empty">未找到匹配结果。</li>';
+        '<li class="empty">No results found.</li>';
       return;
     }
 
     const items = results
       .map((result) => {
-        const title = escapeHtml(result.title || "未命名条目");
+        const title = escapeHtml(result.title || "Untitled entry");
         const score = escapeHtml(formatScore(result.score));
         const pills = [];
         if (result.doc_no) {
-          pills.push(`<span class="pill">文号 ${escapeHtml(result.doc_no)}</span>`);
+          pills.push(`<span class="pill">Document No. ${escapeHtml(result.doc_no)}</span>`);
         }
         if (result.year) {
           pills.push(`<span class="pill">${escapeHtml(result.year)}</span>`);
@@ -403,7 +403,7 @@
           ? `<div class="result-remark">${escapeHtml(result.remark)}</div>`
           : "";
         const bestPath = result.best_path
-          ? `<div class="result-path"><span class="label">最佳路径</span><code>${escapeHtml(
+          ? `<div class="result-path"><span class="label">Best path</span><code>${escapeHtml(
               result.best_path,
             )}</code></div>`
           : "";
@@ -421,18 +421,18 @@
               }
               if (doc.url) {
                 parts.push(
-                  `<a href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">原文</a>`,
+                  `<a href="${escapeHtml(doc.url)}" target="_blank" rel="noopener">Source</a>`,
                 );
               }
               if (!parts.length && doc.local_path) {
                 parts.push(`<code>${escapeHtml(doc.local_path)}</code>`);
               }
-              return `<li>${parts.join(" · ") || "文档"}</li>`;
+              return `<li>${parts.join(" · ") || "Document"}</li>`;
             })
             .join("");
           documentsHtml = `
             <details class="result-documents">
-              <summary>相关文档 (${escapeHtml(result.documents.length)})</summary>
+              <summary>Related documents (${escapeHtml(result.documents.length)})</summary>
               <ul>${documents}</ul>
             </details>
           `;
@@ -442,7 +442,7 @@
           <li class="search-result">
             <div class="result-header">
               <div class="result-title">${title}</div>
-              <div class="result-score">相似度 ${score}</div>
+              <div class="result-score">Similarity ${score}</div>
             </div>
             ${meta}
             ${remark}
@@ -461,7 +461,7 @@
       return;
     }
     setSearchLoading(true);
-    showSearchStatus("检索中…", "info");
+    showSearchStatus("Searching…", "info");
     try {
       const response = await fetch(searchEndpoint, {
         method: "POST",
@@ -501,10 +501,10 @@
         typeof payload.result_count === "number"
           ? payload.result_count
           : results.length;
-      showSearchStatus(`共返回 ${count} 条结果。`, "info");
+      showSearchStatus(`Returned ${count} result(s).`, "info");
     } catch (error) {
       console.error("Search request failed", error);
-      showSearchStatus(`检索失败：${error.message || error}`);
+      showSearchStatus(`Search failed: ${error.message || error}`);
     } finally {
       setSearchLoading(false);
     }
@@ -517,10 +517,10 @@
     }
     const query = searchQueryInput ? searchQueryInput.value.trim() : "";
     if (!query) {
-      showSearchStatus("请输入关键词。");
+      showSearchStatus("Please enter keywords.");
       if (searchResultsList) {
         searchResultsList.innerHTML =
-          '<li class="empty">请输入关键词开始检索。</li>';
+        '<li class="empty">Enter keywords to begin searching.</li>';
       }
       if (searchQueryInput) {
         searchQueryInput.focus();
@@ -533,7 +533,7 @@
       try {
         topk = clampTopk(searchTopkInput.value);
       } catch (error) {
-        showSearchStatus(`返回数量范围为 1 - ${searchMaxTopk}`);
+        showSearchStatus(`Result count must be between 1 and ${searchMaxTopk}`);
         searchTopkInput.focus();
         return;
       }
@@ -558,7 +558,7 @@
         searchForm.classList.add("hidden");
       }
       if (searchStatusEl) {
-        const reason = searchDisabledReason || "检索功能当前不可用。";
+        const reason = searchDisabledReason || "Search is currently unavailable.";
         searchStatusEl.textContent = reason;
         searchStatusEl.classList.remove("hidden");
         searchStatusEl.classList.add("info");
@@ -602,7 +602,7 @@
     if (searchResultsList) {
       if (!initialQuery) {
         searchResultsList.innerHTML =
-          '<li class="empty">输入关键词后开始检索。</li>';
+          '<li class="empty">Enter keywords to start searching.</li>';
       }
     }
     hideSearchStatus();
@@ -641,7 +641,7 @@
       const payload = await response.json();
       return Array.isArray(payload) ? payload : [];
     } catch (error) {
-      throw new Error("无法解析任务列表响应");
+      throw new Error("Unable to parse tasks response");
     }
   }
 
@@ -734,14 +734,14 @@
           const slugValue = String(item.slug);
           handled.add(slugValue);
           const reason =
-            typeof item.error === "string" ? item.error : "未知错误";
+            typeof item.error === "string" ? item.error : "Unknown error";
           failed.push({ slug: slugValue, error: new Error(reason) });
         });
       }
 
       missing.forEach((slug) => {
         if (!handled.has(slug) && !failed.some((item) => item.slug === slug)) {
-          failed.push({ slug, error: new Error("未返回任务数据") });
+          failed.push({ slug, error: new Error("Task data was not returned") });
         }
       });
     }
@@ -786,20 +786,20 @@
 
   function showLoading() {
     if (bodyEl) {
-      bodyEl.innerHTML = '<p class="empty">正在加载条目…</p>';
+      bodyEl.innerHTML = '<p class="empty">Loading entries…</p>';
     }
     clearMessage();
   }
 
   function showEmpty() {
     if (bodyEl) {
-      bodyEl.innerHTML = '<p class="empty">暂无条目信息。</p>';
+      bodyEl.innerHTML = '<p class="empty">No entry information available.</p>';
     }
   }
 
   function renderEntriesList(entries, options) {
     if (!Array.isArray(entries) || entries.length === 0) {
-      return '<p class="empty">暂无条目。</p>';
+      return '<p class="empty">No entries available.</p>';
     }
     const settings = options || {};
     const showSource = Boolean(settings.showSource);
@@ -815,7 +815,7 @@
             : index + 1;
         const serialHtml =
           '<span class="entries-list__serial">#' + escapeHtml(serialValue) + "</span>";
-        const titleText = entry.title ? entry.title : "未命名条目";
+        const titleText = entry.title ? entry.title : "Untitled entry";
         const titleHtml =
           '<span class="entries-list__title">' + escapeHtml(titleText) + "</span>";
         const badges = [];
@@ -833,7 +833,7 @@
         }
         if (highlightAbolish && entry.__isAbolish) {
           badges.push(
-            '<span class="entries-list__badge entries-list__badge--highlight">含“废止”</span>',
+            '<span class="entries-list__badge entries-list__badge--highlight">Contains “abolished”</span>',
           );
         }
         const badgesHtml = badges.length
@@ -864,7 +864,7 @@
                   ? doc.url
                   : doc && doc.local_path
                   ? doc.local_path
-                  : "未命名文档";
+                  : "Untitled document";
               const link =
                 doc && doc.url
                   ? '<a href="' +
@@ -889,7 +889,7 @@
                 );
               }
               if (doc && doc.downloaded) {
-                metaPieces.push('<span class="entries-documents__badge">已下载</span>');
+                metaPieces.push('<span class="entries-documents__badge">Downloaded</span>');
               }
               const metaHtml = metaPieces.length ? " " + metaPieces.join(" ") : "";
               return `<li>${link}${metaHtml}</li>`;
@@ -898,7 +898,7 @@
           documentsHtml = `<ul class="entries-documents">${docItems}</ul>`;
         } else {
           documentsHtml =
-            '<div class="entries-documents entries-documents--empty">暂无关联文档</div>';
+            '<div class="entries-documents entries-documents--empty">No related documents</div>';
         }
         return `<li class="entries-list__item">${header}${remarkHtml}${documentsHtml}</li>`;
       })
@@ -912,13 +912,13 @@
     const name = info && info.name ? String(info.name) : fallbackName;
     const slugDisplay = primarySlug || (info && info.slug) || "";
     if (titleEl) {
-      titleEl.textContent = name || "条目详情";
+      titleEl.textContent = name || "Entry details";
     }
-    document.title = name ? `${name} · 条目详情` : "任务条目详情";
+    document.title = name ? `${name} · Entry details` : "Task entry details";
     if (summaryEl) {
       const parts = [];
       if (slugDisplay) {
-        parts.push(`任务标识 ${slugDisplay}`);
+        parts.push(`Task ID ${slugDisplay}`);
       }
       let entriesCount = null;
       if (Array.isArray(entries)) {
@@ -929,7 +929,7 @@
         entriesCount = fallbackCount;
       }
       if (entriesCount !== null && entriesCount !== "") {
-        parts.push(`条目数 ${entriesCount}`);
+        parts.push(`Entries ${entriesCount}`);
       }
       summaryEl.textContent = parts.length ? parts.join(" · ") : "—";
     }
@@ -950,19 +950,19 @@
       count = fallbackCount;
     }
     if (count !== null && count !== "") {
-      parts.push(`条目 ${count}`);
+      parts.push(`Entries ${count}`);
     }
     if (info && typeof info.documents_total === "number") {
-      parts.push(`文档 ${info.documents_total}`);
+      parts.push(`Documents ${info.documents_total}`);
     }
     if (info && typeof info.downloaded_total === "number") {
-      parts.push(`已下载 ${info.downloaded_total}`);
+      parts.push(`Downloaded ${info.downloaded_total}`);
     }
     if (info && typeof info.pending_total === "number") {
-      parts.push(`待下载 ${info.pending_total}`);
+      parts.push(`Pending downloads ${info.pending_total}`);
     }
     if (info && info.state_last_updated) {
-      parts.push(`更新 ${formatDate(info.state_last_updated)}`);
+      parts.push(`Updated ${formatDate(info.state_last_updated)}`);
     }
     metaEl.textContent = parts.join(" · ") || "—";
   }
@@ -986,7 +986,7 @@
       }
       updateHeader(task, entriesForHeader);
       if (filterActive && summaryEl && filteredCount !== totalEntriesCount) {
-        const suffix = `筛选后 ${filteredCount} 条目`;
+        const suffix = `Filtered ${filteredCount} entries`;
         const baseText =
           summaryEl.textContent && summaryEl.textContent !== "—"
             ? summaryEl.textContent
@@ -996,9 +996,9 @@
       updateMeta(task, cached && Array.isArray(cached.entries) ? cached.entries : []);
       if (metaEl && filterActive) {
         const base = metaEl.textContent || "";
-        let addition = `筛选 ${filteredCount} 条`;
+        let addition = `Filtered ${filteredCount} entries`;
         if (docsTotal && docsFiltered !== docsTotal) {
-          addition += ` / ${docsFiltered} 个文档`;
+          addition += ` / ${docsFiltered} document(s)`;
         }
         metaEl.textContent = base ? `${base} · ${addition}` : addition;
       }
@@ -1006,17 +1006,17 @@
     }
 
     if (titleEl) {
-      titleEl.textContent = "条目详情";
+      titleEl.textContent = "Entry details";
     }
-    document.title = "任务条目详情";
+    document.title = "Task entry details";
 
     if (summaryEl) {
       const tasksLabel = activeSlugs.length
-        ? `已选 ${activeSlugs.length} 个任务`
-        : "全部任务";
-      let entriesPart = `条目数 ${filteredCount}`;
+        ? `Selected ${activeSlugs.length} task(s)`
+        : "All tasks";
+      let entriesPart = `Entries ${filteredCount}`;
       if (filterActive && filteredCount !== totalEntriesCount) {
-        entriesPart = `条目数 ${filteredCount}/${totalEntriesCount}`;
+        entriesPart = `Entries ${filteredCount}/${totalEntriesCount}`;
       }
       summaryEl.textContent = `${tasksLabel} · ${entriesPart}`;
     }
@@ -1025,18 +1025,18 @@
       const pieces = [];
       const totalTasks = activeSlugs.length || state.slugOptions.length;
       if (totalTasks) {
-        pieces.push(`任务 ${totalTasks}`);
+        pieces.push(`Tasks ${totalTasks}`);
       }
       if (filterActive && filteredCount !== totalEntriesCount) {
-        pieces.push(`条目 ${filteredCount}/${totalEntriesCount}`);
+        pieces.push(`Entries ${filteredCount}/${totalEntriesCount}`);
       } else {
-        pieces.push(`条目 ${filteredCount}`);
+        pieces.push(`Entries ${filteredCount}`);
       }
       if (docsTotal) {
         if (filterActive && docsFiltered !== docsTotal) {
-          pieces.push(`文档 ${docsFiltered}/${docsTotal}`);
+          pieces.push(`Documents ${docsFiltered}/${docsTotal}`);
         } else {
-          pieces.push(`文档 ${docsTotal}`);
+          pieces.push(`Documents ${docsTotal}`);
         }
       }
       metaEl.textContent = pieces.join(" · ") || "—";
@@ -1050,7 +1050,7 @@
     const activeSlugs = getActiveSlugs();
     if (!activeSlugs.length) {
       showEmpty();
-      showMessage("暂无可筛选的任务，请稍后重试。", "info");
+      showMessage("No tasks are available for filtering. Please try again later.", "info");
       return;
     }
 
@@ -1063,7 +1063,7 @@
     try {
       loadResult = await ensureEntriesForSlugs(activeSlugs);
     } catch (error) {
-      showMessage(`加载条目时发生错误：${error.message || error}`);
+      showMessage(`Failed to load entries: ${error.message || error}`);
       showEmpty();
       return;
     }
@@ -1074,10 +1074,10 @@
       const reason =
         firstError.error && firstError.error.message
           ? firstError.error.message
-          : firstError.error || "未知错误";
-      showMessage(`无法加载任务 ${firstError.slug} 的条目：${reason}`);
+          : firstError.error || "Unknown error";
+      showMessage(`Unable to load entries for task ${firstError.slug}: ${reason}`);
     } else if (state.showAbolishOnly) {
-      showMessage('已启用“废止”筛选，仅展示相关条目。', "info");
+      showMessage('The “abolished” filter is enabled; showing relevant entries only.', "info");
     } else {
       clearMessage();
     }
@@ -1100,8 +1100,8 @@
       if (bodyEl) {
         const message =
           !combinedEntries.length && !state.showAbolishOnly
-            ? '<p class="empty">暂无条目。</p>'
-            : '<p class="empty">没有符合筛选条件的条目。</p>';
+            ? '<p class="empty">No entries available.</p>'
+            : '<p class="empty">No entries match the filters.</p>';
         bodyEl.innerHTML = message;
       }
     } else if (bodyEl) {
@@ -1142,10 +1142,13 @@
     }
 
     if (staticSnapshot) {
-      showMessage("当前页面基于静态快照，无法查看条目明细。", "info");
+      showMessage(
+        "This page is based on a static snapshot; entry details are unavailable.",
+        "info",
+      );
       if (bodyEl) {
         bodyEl.innerHTML =
-          '<p class="empty">静态快照不包含条目明细，请返回仪表盘查看概览。</p>';
+          '<p class="empty">The static snapshot does not include entry details. Return to the dashboard for an overview.</p>';
       }
       updateMeta(null, null);
       return;
@@ -1177,13 +1180,13 @@
     document.addEventListener("DOMContentLoaded", () => {
       init().catch((error) => {
         console.error("Failed to initialise entries page", error);
-        showMessage(`初始化失败：${error.message || error}`);
+        showMessage(`Initialisation failed: ${error.message || error}`);
       });
     });
   } else {
     init().catch((error) => {
       console.error("Failed to initialise entries page", error);
-      showMessage(`初始化失败：${error.message || error}`);
+      showMessage(`Initialisation failed: ${error.message || error}`);
     });
   }
 })();
