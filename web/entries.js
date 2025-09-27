@@ -5,7 +5,6 @@
 
   const generatedAtEls = document.querySelectorAll("[data-generated-at]");
   const titleEl = document.getElementById("entries-title");
-  const summaryEl = document.getElementById("entries-summary");
   const metaEl = document.getElementById("entries-meta");
   const messageEl = document.getElementById("entries-message");
   const bodyEl = document.getElementById("entries-body");
@@ -915,24 +914,6 @@
       titleEl.textContent = name || "Entry details";
     }
     document.title = name ? `${name} · Entry details` : "Task entry details";
-    if (summaryEl) {
-      const parts = [];
-      if (slugDisplay) {
-        parts.push(`Task ID ${slugDisplay}`);
-      }
-      let entriesCount = null;
-      if (Array.isArray(entries)) {
-        entriesCount = entries.length;
-      } else if (info && typeof info.entries_total === "number") {
-        entriesCount = info.entries_total;
-      } else if (fallbackCount) {
-        entriesCount = fallbackCount;
-      }
-      if (entriesCount !== null && entriesCount !== "") {
-        parts.push(`Entries ${entriesCount}`);
-      }
-      summaryEl.textContent = parts.length ? parts.join(" · ") : "—";
-    }
   }
 
   function updateMeta(task, entries) {
@@ -985,14 +966,6 @@
         entriesForHeader = cached.entries;
       }
       updateHeader(task, entriesForHeader);
-      if (filterActive && summaryEl && filteredCount !== totalEntriesCount) {
-        const suffix = `Filtered ${filteredCount} entries`;
-        const baseText =
-          summaryEl.textContent && summaryEl.textContent !== "—"
-            ? summaryEl.textContent
-            : "";
-        summaryEl.textContent = baseText ? `${baseText} · ${suffix}` : suffix;
-      }
       updateMeta(task, cached && Array.isArray(cached.entries) ? cached.entries : []);
       if (metaEl && filterActive) {
         const base = metaEl.textContent || "";
@@ -1009,17 +982,6 @@
       titleEl.textContent = "Entry details";
     }
     document.title = "Task entry details";
-
-    if (summaryEl) {
-      const tasksLabel = activeSlugs.length
-        ? `Selected ${activeSlugs.length} task(s)`
-        : "All tasks";
-      let entriesPart = `Entries ${filteredCount}`;
-      if (filterActive && filteredCount !== totalEntriesCount) {
-        entriesPart = `Entries ${filteredCount}/${totalEntriesCount}`;
-      }
-      summaryEl.textContent = `${tasksLabel} · ${entriesPart}`;
-    }
 
     if (metaEl) {
       const pieces = [];

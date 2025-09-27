@@ -824,18 +824,6 @@ body.entries-page {
   flex-wrap: wrap;
 }
 
-.entries-summary {
-  margin: 0;
-  padding: 1rem 1.5rem 0;
-  font-size: 0.95rem;
-  color: #475569;
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  flex-wrap: wrap;
-  min-height: 1.5em;
-}
-
 .entries-main {
   padding: 2rem 1.5rem 2.5rem;
   display: flex;
