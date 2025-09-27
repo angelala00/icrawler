@@ -15,7 +15,7 @@ import sys
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 from zipfile import ZipFile
 
 import xml.etree.ElementTree as ET
@@ -40,6 +40,18 @@ DEFAULT_SEARCH_TASKS = [
     TIAOFASI_DEPARTMENTAL_RULE,
     TIAOFASI_NORMATIVE_DOCUMENT,
 ]
+
+# Prefer sources that are more likely to host the authoritative, well-formatted
+# version of a policy. Larger numbers indicate higher priority during
+# deduplication across tasks.
+_TASK_PRIORITY: Dict[str, int] = {
+    TIAOFASI_DEPARTMENTAL_RULE: 500,
+    TIAOFASI_ADMINISTRATIVE_REGULATION: 450,
+    TIAOFASI_NATIONAL_LAW: 420,
+    TIAOFASI_NORMATIVE_DOCUMENT: 400,
+    ZHENGWUGONGKAI_CHINESE_REGULATIONS: 300,
+    ZHENGWUGONGKAI_ADMINISTRATIVE_NORMATIVE_DOCUMENTS: 250,
+}
 
 def canonicalize_task_name(task_name: str) -> str:
     """Return the canonical task identifier for ``task_name``."""
@@ -286,6 +298,49 @@ def guess_agency(s: str) -> Optional[str]:
         return '、'.join(hits[:3])
     return None
 
+
+_TITLE_EXCLUDE_KEYWORDS = [
+    "废止",
+    "停止执行",
+    "停止施行",
+    "停止实施",
+    "终止执行",
+    "终止施行",
+    "终止实施",
+    "失效",
+    "作废",
+    "停止使用",
+]
+
+_REMARK_EXCLUDE_KEYWORDS = [
+    "已废止",
+    "已失效",
+    "停止执行",
+    "停止施行",
+    "停止实施",
+    "停止使用",
+    "终止执行",
+    "终止施行",
+    "终止实施",
+    "作废",
+]
+
+
+def _contains_keywords(text: str, keywords: Sequence[str]) -> bool:
+    if not text:
+        return False
+    return any(keyword in text for keyword in keywords)
+
+
+def is_probable_policy(entry: "Entry") -> bool:
+    normalized = entry.norm_title or norm_text(entry.title)
+    remark = norm_text(entry.remark or "")
+    if _contains_keywords(normalized, _TITLE_EXCLUDE_KEYWORDS):
+        return False
+    if _contains_keywords(remark, _REMARK_EXCLUDE_KEYWORDS):
+        return False
+    return True
+
 def pick_best_path(documents: List[Dict[str, Any]]) -> Optional[str]:
     if not documents:
         return None
@@ -450,6 +505,9 @@ class Entry:
     agency: Optional[str] = None
     best_path: Optional[str] = None
     tokens: List[str] = field(default_factory=list)
+    source_task: Optional[str] = None
+    source_priority: int = 0
+    is_policy: bool = True
 
     def build(self):
         self.norm_title = norm_text(self.title)
@@ -460,6 +518,10 @@ class Entry:
         self.agency  = guess_agency(self.title)
         self.best_path = pick_best_path(self.documents)
         self.tokens = tokenize_zh(self.norm_title)
+        canonical_task = canonicalize_task_name(self.source_task or "")
+        self.source_task = canonical_task or self.source_task
+        self.source_priority = _TASK_PRIORITY.get(self.source_task or "", 0)
+        self.is_policy = is_probable_policy(self)
 
     def to_dict(self, include_documents: bool = True) -> Dict[str, Any]:
         data: Dict[str, Any] = {
@@ -473,6 +535,8 @@ class Entry:
             "agency": self.agency,
             "best_path": self.best_path,
         }
+        if self.source_task:
+            data["source_task"] = self.source_task
         if include_documents:
             data["documents"] = self.documents
         return data
@@ -1107,7 +1171,7 @@ def extract_clause_from_entry(
             result.error = "paragraph_not_found"
     return result
 
-def load_entries(json_path: str) -> List[Entry]:
+def load_entries(json_path: str, source_task: Optional[str] = None) -> List[Entry]:
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     es = []
@@ -1116,7 +1180,8 @@ def load_entries(json_path: str) -> List[Entry]:
             id=raw.get('serial', i),
             title=raw.get('title', ''),
             remark=raw.get('remark', '') or '',
-            documents=raw.get('documents', [])
+            documents=raw.get('documents', []),
+            source_task=source_task,
         )
         e.build()
         es.append(e)
@@ -1195,6 +1260,80 @@ def _flatten_paths(paths: Iterable[Any]) -> List[str]:
     return normalized
 
 
+def _guess_task_from_path(path: Any) -> Optional[str]:
+    """Best-effort attempt to infer the task name from a JSON path."""
+
+    candidates: List[str] = []
+    try:
+        path_obj = Path(path)
+    except Exception:
+        candidates.append(str(path))
+    else:
+        candidates.extend([path_obj.name, path_obj.stem])
+        candidates.extend(parent.name for parent in path_obj.parents)
+
+    normalized_candidates = [
+        canonicalize_task_name(candidate) for candidate in candidates if candidate
+    ]
+    known_tasks = {
+        canonicalize_task_name(name) for name in DEFAULT_SEARCH_TASKS
+    }
+    for candidate in normalized_candidates:
+        if not candidate:
+            continue
+        for task_name in known_tasks:
+            if task_name and task_name in candidate:
+                return task_name
+    return None
+
+
+def _entry_sort_key(entry: Entry) -> Tuple[int, int, int, int, int, int]:
+    policy_score = 1 if entry.is_policy else 0
+    task_score = entry.source_priority
+    doctype_score = 1 if entry.doctype and entry.doctype not in {"通知", "公告"} else 0
+    pdf_score = 1 if entry.best_path and entry.best_path.lower().endswith(".pdf") else 0
+    doc_count_score = len(entry.documents)
+    id_score = entry.id if isinstance(entry.id, int) else 0
+    return (
+        policy_score,
+        task_score,
+        doctype_score,
+        pdf_score,
+        doc_count_score,
+        id_score,
+    )
+
+
+def _dedupe_entries(entries: List[Entry]) -> List[Entry]:
+    if not entries:
+        return []
+    ranked = sorted(entries, key=_entry_sort_key, reverse=True)
+    seen_docnos: Set[str] = set()
+    seen_titles: Set[str] = set()
+    seen_paths: Set[str] = set()
+    deduped: List[Entry] = []
+    for entry in ranked:
+        docno_key = (entry.doc_no or "").strip().lower() or None
+        title_key = entry.norm_title or norm_text(entry.title)
+        path_key = entry.best_path.strip().lower() if isinstance(entry.best_path, str) else None
+        if docno_key:
+            if docno_key in seen_docnos:
+                continue
+        else:
+            if title_key and title_key in seen_titles:
+                continue
+        if path_key and path_key in seen_paths:
+            continue
+        deduped.append(entry)
+        if docno_key:
+            seen_docnos.add(docno_key)
+        elif title_key:
+            seen_titles.add(title_key)
+        if path_key:
+            seen_paths.add(path_key)
+    return deduped
+
+
 class PolicyFinder:
     def __init__(self, *json_paths: Any):
         self.entries: List[Entry] = []
@@ -1203,6 +1342,7 @@ class PolicyFinder:
         self._entries_by_norm: Dict[str, List[Entry]] = {}
         self._text_cache: Dict[int, Optional[str]] = {}
         self._normalized_text_cache: Dict[int, Optional[str]] = {}
+        self._excluded_entries: List[Entry] = []
         if json_paths:
             self.load(*json_paths)
 
@@ -1212,8 +1352,11 @@ class PolicyFinder:
             raise ValueError("At least one JSON state path is required")
         entries: List[Entry] = []
         for path in paths:
-            entries.extend(load_entries(path))
-        self.entries = entries
+            task_name = _guess_task_from_path(path)
+            entries.extend(load_entries(path, task_name))
+        deduped_entries = _dedupe_entries(entries)
+        self._excluded_entries = [entry for entry in deduped_entries if not entry.is_policy]
+        self.entries = [entry for entry in deduped_entries if entry.is_policy]
         self.idx_loaded = True
         self._rebuild_indexes()
 
