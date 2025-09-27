@@ -1181,6 +1181,21 @@ body.api-page {
   box-shadow: 0 14px 30px rgba(31, 42, 68, 0.14);
 }
 
+.api-endpoint-list__button.is-disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.api-endpoint-list__button.is-disabled:hover,
+.api-endpoint-list__button.is-disabled:focus-visible {
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+  box-shadow: none;
+  transform: none;
+}
+
 .api-endpoint-list__button.is-active {
   background: #e0ecff;
   border-color: #2563eb;

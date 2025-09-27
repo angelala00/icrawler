@@ -12,6 +12,13 @@
       : null;
   const searchEnabled =
     Boolean(searchConfig && searchConfig.enabled) && !staticSnapshot;
+  const searchReason =
+    searchConfig && typeof searchConfig.reason === "string"
+      ? searchConfig.reason.trim()
+      : "";
+  const shouldIncludePolicyFinderEndpoints = Boolean(
+    searchConfig && (searchConfig.enabled || searchConfig.endpoint),
+  );
 
   const endpointListEl = document.getElementById("api-endpoint-list");
   const endpointTitleEl = document.getElementById("api-endpoint-title");
@@ -60,7 +67,7 @@
     },
   ];
 
-  if (searchEnabled) {
+  if (shouldIncludePolicyFinderEndpoints) {
     const searchPath =
       typeof searchConfig.endpoint === "string" && searchConfig.endpoint
         ? searchConfig.endpoint
@@ -107,8 +114,14 @@
     };
 
     const includeDocumentsDefault =
-      searchConfig.includeDocuments === false ? false : true;
-    const defaultTopk = searchConfig.defaultTopk || 5;
+      searchConfig && searchConfig.includeDocuments === false ? false : true;
+    const defaultTopk =
+      searchConfig && typeof searchConfig.defaultTopk === "number"
+        ? searchConfig.defaultTopk
+        : 5;
+    const searchDisabledReason = !searchEnabled
+      ? searchReason || "Policy search is currently unavailable."
+      : "";
 
     defaultEndpoints.push(
       {
@@ -122,6 +135,8 @@
         hint:
           "Provide ?query= keywords. Optional ?topk= controls the number of matches and ?include_documents= toggles document payloads.",
         body: "",
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
       },
       {
         id: "search-post",
@@ -142,6 +157,8 @@
           null,
           2,
         ),
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
       },
       {
         id: "search-policies",
@@ -154,6 +171,8 @@
         hint:
           "Use ?query= to narrow results. Omitting the parameter returns the full catalog sorted by title.",
         body: "",
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
       },
       {
         id: "search-policy-detail",
@@ -166,6 +185,8 @@
         hint:
           "Add one or more ?include= values (meta, text, outline, all) to control the response payload.",
         body: "",
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
       },
       {
         id: "search-clause-get",
@@ -178,6 +199,8 @@
         hint:
           "Both ?title= and ?item= (or ?clause=/ ?article=) are required to locate the matching clause.",
         body: "",
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
       },
       {
         id: "search-clause-post",
@@ -197,6 +220,8 @@
           null,
           2,
         ),
+        disabled: !searchEnabled,
+        disabledReason: searchDisabledReason,
       },
     );
   }
@@ -326,6 +351,13 @@
       pathEl.textContent = `${endpoint.method} ${endpoint.path}`;
       button.appendChild(nameEl);
       button.appendChild(pathEl);
+      if (endpoint.disabled) {
+        button.classList.add("is-disabled");
+        if (endpoint.disabledReason) {
+          button.title = endpoint.disabledReason;
+        }
+        button.setAttribute("aria-disabled", "true");
+      }
       button.addEventListener("click", () => {
         selectEndpoint(endpoint.id);
       });
@@ -348,18 +380,33 @@
 
   function updateEndpointDetails(endpoint) {
     if (endpointTitleEl) {
-      endpointTitleEl.textContent = endpoint
-        ? endpoint.name
-        : "Request builder";
+      let titleText = endpoint ? endpoint.name : "Request builder";
+      if (endpoint && endpoint.disabled) {
+        titleText += " (unavailable)";
+      }
+      endpointTitleEl.textContent = titleText;
     }
     if (endpointDescriptionEl) {
-      endpointDescriptionEl.textContent = endpoint
-        ? endpoint.description || "Configure the request and send it to view the response."
+      const baseDescription = endpoint
+        ? endpoint.description ||
+          "Configure the request and send it to view the response."
         : "Choose an endpoint or enter a path to send a request.";
+      const descriptionText = endpoint && endpoint.disabled && endpoint.disabledReason
+        ? `${baseDescription} ${endpoint.disabledReason}`.trim()
+        : baseDescription;
+      endpointDescriptionEl.textContent = descriptionText;
     }
     if (endpointHintEl) {
+      const hintParts = [];
       if (endpoint && endpoint.hint) {
-        endpointHintEl.textContent = endpoint.hint;
+        hintParts.push(endpoint.hint);
+      }
+      if (endpoint && endpoint.disabled && endpoint.disabledReason) {
+        hintParts.push(endpoint.disabledReason);
+      }
+      const hintText = hintParts.join(" ").trim();
+      if (hintText) {
+        endpointHintEl.textContent = hintText;
         endpointHintEl.classList.remove("hidden");
       } else {
         endpointHintEl.textContent = "";
