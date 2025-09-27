@@ -6,11 +6,11 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple
 
 from icrawler import pbc_monitor
 from icrawler.crawler import safe_filename
-from icrawler.text_pipeline import ProcessReport, process_state_data
+from icrawler.text_pipeline import EntryTextRecord, ProcessReport, process_state_data
 
 
 def _default_output_state_path(state_path: Path) -> Path:
@@ -38,9 +38,29 @@ def run(
     state_path: Path,
     output_dir: Path,
     output_state_path: Optional[Path] = None,
+    *,
+    progress_callback: Optional[Callable[[EntryTextRecord, int, int], None]] = None,
 ) -> Tuple[ProcessReport, Dict[str, Any]]:
     data: Dict[str, Any] = json.loads(state_path.read_text(encoding="utf-8"))
-    report = process_state_data(data, output_dir, state_path=state_path)
+    total_entries = 0
+    raw_entries = data.get("entries")
+    if isinstance(raw_entries, list):
+        total_entries = len(raw_entries)
+
+    processed_count = 0
+
+    def _handle_progress(record: EntryTextRecord) -> None:
+        nonlocal processed_count
+        processed_count += 1
+        if progress_callback is not None:
+            progress_callback(record, processed_count, total_entries)
+
+    report = process_state_data(
+        data,
+        output_dir,
+        state_path=state_path,
+        progress_callback=_handle_progress if progress_callback is not None else None,
+    )
     if output_state_path is not None:
         output_state_path.parent.mkdir(parents=True, exist_ok=True)
         output_state_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -298,7 +318,21 @@ def main() -> None:  # pragma: no cover - exercised via integration tests
             output_state_path = _default_output_state_path(state_path)
         output_state_path = output_state_path.expanduser().resolve() if output_state_path else None
 
-        report, state_data = run(state_path, output_dir, output_state_path)
+        def _print_progress(record: EntryTextRecord, processed: int, total: int) -> None:
+            total_display = f"/{total}" if total else ""
+            serial_text = f"{record.serial} - " if record.serial is not None else ""
+            title = record.title or "(无标题)"
+            print(
+                f"  - [{processed}{total_display}] {serial_text}{title} -> {record.text_path}",
+                flush=True,
+            )
+
+        report, state_data = run(
+            state_path,
+            output_dir,
+            output_state_path,
+            progress_callback=_print_progress,
+        )
         print(_format_summary(report))
 
         if args.summary is not None:
@@ -368,7 +402,21 @@ def main() -> None:  # pragma: no cover - exercised via integration tests
         print(f"摘要结果: {summary_path}")
         print("开始提取文本...")
 
-        report, state_data = run(state_path, output_dir, output_state_path)
+        def _print_progress(record: EntryTextRecord, processed: int, total: int) -> None:
+            total_display = f"/{total}" if total else ""
+            serial_text = f"{record.serial} - " if record.serial is not None else ""
+            title = record.title or "(无标题)"
+            print(
+                f"  - [{processed}{total_display}] {serial_text}{title} -> {record.text_path}",
+                flush=True,
+            )
+
+        report, state_data = run(
+            state_path,
+            output_dir,
+            output_state_path,
+            progress_callback=_print_progress,
+        )
         payload = _build_summary_payload(
             plan=TaskPlan(plan.display_name, state_path, slug),
             report=report,

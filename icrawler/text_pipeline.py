@@ -17,7 +17,7 @@ import io
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from zipfile import ZipFile
 
 import re
@@ -667,6 +667,7 @@ def process_state_data(
     output_dir: Path,
     *,
     state_path: Optional[Path] = None,
+    progress_callback: Optional[Callable[[EntryTextRecord], None]] = None,
 ) -> ProcessReport:
     """Extract text for every entry and update *state_data* in place."""
 
@@ -738,5 +739,8 @@ def process_state_data(
             attempts=extraction.attempts,
         )
         records.append(record)
+
+        if progress_callback is not None:
+            progress_callback(record)
 
     return ProcessReport(records=records)
