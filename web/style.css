@@ -808,7 +808,7 @@ body.entries-page {
 
 .entries-header__title {
   margin: 0;
-  font-size: 1.7rem;
+  font-size: inherit;
 }
 
 .entries-header__meta {
