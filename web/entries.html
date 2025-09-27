@@ -10,12 +10,14 @@
   <body class="entries-page">
     <header class="app-header entries-header">
       <div class="app-header__top entries-header__top">
-        <h1 class="entries-header__title" id="entries-title">Entry details</h1>
-        <a
-          href="index.html"
-          class="app-header__entries-link entries-header__back"
-          id="entries-back-link"
-        >Back to dashboard</a>
+        <div class="entries-header__title-group">
+          <h1 class="entries-header__title" id="entries-title">Entry details</h1>
+        </div>
+        <nav class="app-header__nav" aria-label="Primary">
+          <a class="button-link" href="index.html">Dashboard</a>
+          <a class="button-link button-link--current" href="entries.html">Entries</a>
+          <a class="button-link" href="api-explorer.html">API Explorer</a>
+        </nav>
       </div>
       <p class="entries-header__meta">Generated at <span data-generated-at>—</span></p>
     </header>
