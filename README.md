@@ -45,6 +45,25 @@ python -m icrawler.crawler [--delay N] [--jitter M] <output_dir> <url1> [<url2> 
 many random seconds so servers are not hammered. Install the dependencies from
 `requirements.txt` before running.
 
+### Policy text extractor (`python -m extractor.extract_policy_texts`)
+
+Generate plain-text `.txt` files for every entry found in a task's
+`state.json`. Provide the state file explicitly or let the tool auto-discover
+every configured task in `pbc_config.json`:
+
+```
+# Process a single state file
+python -m extractor.extract_policy_texts artifacts/downloads/task_state.json --save-updated-state --summary summaries/task.json
+
+# Auto-discover every task defined in pbc_config.json
+python -m extractor.extract_policy_texts --save-updated-state --summary summaries/
+```
+
+When auto-discovery is used the extractor writes each task's output beneath
+`<artifact_dir>/extract/<task-slug>/` and saves a JSON summary alongside the
+generated text files. Use `--task` repeatedly to narrow the run to specific
+tasks or `--artifact-dir` / `--config` to point at alternative locations.
+
 ## PBC Monitor Quick Start
 
 `icrawler.pbc_monitor` loads tasks from `pbc_config.json` (multi-task configs are
