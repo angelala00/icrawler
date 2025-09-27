@@ -15,6 +15,7 @@ from .policy_finder import (
     extract_clause_from_entry,
     norm_text,
     parse_clause_reference,
+    _resolve_document_path,
 )
 
 
@@ -177,9 +178,48 @@ class ClauseLookup:
                 return partial
             keys = list(self._entries_by_norm.keys())
             close = get_close_matches(normalized, keys, n=1, cutoff=0.75)
-            if close:
-                return list(self._entries_by_norm.get(close[0], []))
+        if close:
+            return list(self._entries_by_norm.get(close[0], []))
         return []
+
+    def find_text_path(self, title: str) -> Optional[Path]:
+        """Return the best text document path for ``title`` if available."""
+
+        for entry in self._match_entries(title):
+            candidates: List[Path] = []
+            if entry.text_path:
+                candidates.append(entry.text_path)
+            for document in entry.documents:
+                path_value = (
+                    document.get("local_path")
+                    or document.get("localPath")
+                    or document.get("path")
+                )
+                if not isinstance(path_value, str):
+                    continue
+                doc_type = document.get("type")
+                lowered = doc_type.lower() if isinstance(doc_type, str) else ""
+                if lowered not in {"text", "txt"} and not path_value.lower().endswith(
+                    (".txt", ".text", ".md")
+                ):
+                    continue
+                resolved = _resolve_document_path(path_value)
+                if resolved:
+                    candidates.append(resolved)
+                else:
+                    try:
+                        candidates.append(Path(path_value))
+                    except TypeError:
+                        continue
+            for candidate in candidates:
+                resolved = (
+                    candidate
+                    if candidate.is_absolute() and candidate.exists()
+                    else _resolve_document_path(str(candidate))
+                )
+                if resolved and resolved.exists():
+                    return resolved
+        return None
 
     def find_clause(
         self, title: str, clause_text: str

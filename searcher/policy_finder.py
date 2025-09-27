@@ -222,6 +222,23 @@ def _int_to_chinese(number: int) -> str:
     return result or "零"
 
 
+def _parse_clause_number(text: Optional[str]) -> Optional[int]:
+    """Parse clause numbering that may contain Chinese numerals or digits."""
+
+    if text is None:
+        return None
+    value = _chinese_to_int(text)
+    if value is not None:
+        return value
+    digits = re.sub(r"\D", "", text)
+    if digits:
+        try:
+            return int(digits)
+        except ValueError:
+            return None
+    return None
+
+
 def _number_variants(number: int) -> Sequence[str]:
     variants = {str(number), _int_to_chinese(number)}
     if number == 2:
@@ -272,7 +289,15 @@ def guess_agency(s: str) -> Optional[str]:
 def pick_best_path(documents: List[Dict[str, Any]]) -> Optional[str]:
     if not documents:
         return None
-    order = {'pdf': 4, 'docx': 3, 'doc': 3, 'word': 3, 'html': 2, 'txt': 1, 'text': 1}
+    order = {
+        'text': 5,
+        'txt': 5,
+        'pdf': 4,
+        'docx': 3,
+        'doc': 3,
+        'word': 3,
+        'html': 2,
+    }
     docs = sorted(documents, key=lambda d: order.get(d.get('type','').lower(), 0), reverse=True)
     for d in docs:
         p = d.get('local_path') or d.get('path') or d.get('localPath')
@@ -759,6 +784,85 @@ def _document_candidates(entry: Entry) -> Iterable[Tuple[str, Optional[str]]]:
         yield entry.best_path, None
 
 
+def build_outline_from_text(text: str) -> List[Dict[str, Any]]:
+    """Build a hierarchical outline from extracted policy text."""
+
+    if not text:
+        return []
+
+    lines, norm_lines = _prepare_clause_lines(text)
+    article_pattern = re.compile(rf"^第\s*({_CLAUSE_NUMBER_CLASS}+)\s*条")
+    paragraph_pattern = re.compile(rf"^第\s*({_CLAUSE_NUMBER_CLASS}+)\s*(款|段)")
+    item_pattern = re.compile(r"^[（(]\s*({_CLAUSE_NUMBER_CLASS}+)\s*[)）]")
+    bullet_pattern = re.compile(
+        rf"^({_CLAUSE_NUMBER_CLASS}+)\s*(?:、|\\.|．|﹒|:|：|·|•)"
+    )
+
+    outline: List[Dict[str, Any]] = []
+    current_article: Optional[Dict[str, Any]] = None
+    current_paragraph: Optional[Dict[str, Any]] = None
+
+    for raw_line, norm_line in zip(lines, norm_lines):
+        label = raw_line.strip() or norm_line
+        if not label:
+            continue
+
+        article_match = article_pattern.match(norm_line)
+        if article_match:
+            article_number = _parse_clause_number(article_match.group(1))
+            current_article = {
+                "type": "article",
+                "number": article_number,
+                "label": label,
+                "children": [],
+            }
+            outline.append(current_article)
+            current_paragraph = None
+            continue
+
+        if current_article is None:
+            continue
+
+        paragraph_match = paragraph_pattern.match(norm_line)
+        if paragraph_match:
+            paragraph_number = _parse_clause_number(paragraph_match.group(1))
+            current_paragraph = {
+                "type": "paragraph",
+                "number": paragraph_number,
+                "label": label,
+                "children": [],
+            }
+            current_article.setdefault("children", []).append(current_paragraph)
+            continue
+
+        item_match = item_pattern.match(norm_line)
+        if item_match:
+            item_number = _parse_clause_number(item_match.group(1))
+            parent = current_paragraph or current_article
+            parent.setdefault("children", []).append(
+                {
+                    "type": "item",
+                    "number": item_number,
+                    "label": label,
+                }
+            )
+            continue
+
+        bullet_match = bullet_pattern.match(norm_line)
+        if bullet_match:
+            item_number = _parse_clause_number(bullet_match.group(1))
+            parent = current_paragraph or current_article
+            parent.setdefault("children", []).append(
+                {
+                    "type": "item",
+                    "number": item_number,
+                    "label": label,
+                }
+            )
+
+    return outline
+
+
 def _extract_docx_text(data: bytes) -> Tuple[Optional[str], Optional[str]]:
     """Extract plain text content from a docx payload."""
 
@@ -1095,6 +1199,10 @@ class PolicyFinder:
     def __init__(self, *json_paths: Any):
         self.entries: List[Entry] = []
         self.idx_loaded = False
+        self._entries_by_id: Dict[int, Entry] = {}
+        self._entries_by_norm: Dict[str, List[Entry]] = {}
+        self._text_cache: Dict[int, Optional[str]] = {}
+        self._normalized_text_cache: Dict[int, Optional[str]] = {}
         if json_paths:
             self.load(*json_paths)
 
@@ -1107,6 +1215,7 @@ class PolicyFinder:
             entries.extend(load_entries(path))
         self.entries = entries
         self.idx_loaded = True
+        self._rebuild_indexes()
 
     def search(self, query: str, topk: int = 1) -> List[Tuple[Entry, float]]:
         assert self.idx_loaded, "Index not loaded"
@@ -1119,6 +1228,146 @@ class PolicyFinder:
 
     def extract_clause(self, entry: Entry, reference: ClauseReference) -> ClauseResult:
         return extract_clause_from_entry(entry, reference)
+
+    def _rebuild_indexes(self) -> None:
+        self._entries_by_id = {}
+        self._entries_by_norm = {}
+        self._text_cache = {}
+        self._normalized_text_cache = {}
+        for entry in self.entries:
+            self._entries_by_id[entry.id] = entry
+            normalized = entry.norm_title or norm_text(entry.title)
+            if not normalized:
+                continue
+            bucket = self._entries_by_norm.setdefault(normalized, [])
+            bucket.append(entry)
+
+    def all_entries(self) -> List[Entry]:
+        assert self.idx_loaded, "Index not loaded"
+        return list(self.entries)
+
+    def find_entry(self, identifier: Any) -> Optional[Entry]:
+        if isinstance(identifier, Entry):
+            return identifier
+        if isinstance(identifier, int):
+            return self._entries_by_id.get(identifier)
+        if isinstance(identifier, str):
+            stripped = identifier.strip()
+            if not stripped:
+                return None
+            try:
+                numeric = int(stripped)
+            except ValueError:
+                numeric = None
+            if numeric is not None:
+                entry = self._entries_by_id.get(numeric)
+                if entry is not None:
+                    return entry
+            normalized = norm_text(stripped)
+            bucket = self._entries_by_norm.get(normalized)
+            if bucket:
+                return bucket[0]
+        return None
+
+    def _store_text_cache(self, entry_id: int, text: str) -> str:
+        self._text_cache[entry_id] = text
+        self._normalized_text_cache[entry_id] = norm_text(text)
+        return text
+
+    def _text_document_candidates(self, entry: Entry) -> Iterable[Path]:
+        seen: set = set()
+        for path_value, declared_type in _document_candidates(entry):
+            path_str = str(path_value)
+            lowered = path_str.lower()
+            doc_type = (declared_type or "").lower() if declared_type else ""
+            if doc_type in {"text", "txt"} or lowered.endswith((".txt", ".text", ".md")):
+                if path_str in seen:
+                    continue
+                seen.add(path_str)
+                resolved = _resolve_document_path(path_str)
+                if resolved:
+                    yield resolved
+
+    def get_entry_text(
+        self, entry: Entry, clause_lookup: Optional["ClauseLookup"] = None
+    ) -> Optional[str]:
+        if entry.id in self._text_cache:
+            return self._text_cache[entry.id]
+
+        for candidate in self._text_document_candidates(entry):
+            text, _doc_type, error = _load_document_text(candidate, "text")
+            if error or text is None:
+                continue
+            return self._store_text_cache(entry.id, text)
+
+        if clause_lookup is not None:
+            text_path = clause_lookup.find_text_path(entry.title)
+            if text_path:
+                text, _doc_type, error = _load_document_text(text_path, "text")
+                if not error and text is not None:
+                    return self._store_text_cache(entry.id, text)
+
+        self._text_cache[entry.id] = None
+        self._normalized_text_cache[entry.id] = None
+        return None
+
+    def get_entry_normalized_text(
+        self, entry: Entry, clause_lookup: Optional["ClauseLookup"] = None
+    ) -> Optional[str]:
+        if entry.id in self._normalized_text_cache:
+            return self._normalized_text_cache[entry.id]
+        text = self.get_entry_text(entry, clause_lookup)
+        if text is None:
+            self._normalized_text_cache[entry.id] = None
+            return None
+        normalized = norm_text(text)
+        self._normalized_text_cache[entry.id] = normalized
+        return normalized
+
+    def keyword_search(
+        self, query: str, clause_lookup: Optional["ClauseLookup"] = None
+    ) -> List[Tuple[Entry, int, int, int]]:
+        assert self.idx_loaded, "Index not loaded"
+        normalized_query = norm_text(query)
+        tokens = [token for token in tokenize_zh(normalized_query) if token]
+        unique_tokens = list(dict.fromkeys(tokens))
+        if not normalized_query and not unique_tokens:
+            return []
+
+        results: List[Tuple[Entry, int, int, int]] = []
+        token_count = len(unique_tokens)
+
+        for entry in self.entries:
+            title_exact = 1 if normalized_query and normalized_query in entry.norm_title else 0
+            title_hits = sum(1 for token in unique_tokens if token in entry.norm_title)
+
+            content_hits = 0
+            need_content = False
+            if title_exact or title_hits > 0:
+                need_content = False
+            elif token_count or normalized_query:
+                need_content = True
+
+            if need_content:
+                normalized_text = self.get_entry_normalized_text(entry, clause_lookup)
+                if normalized_text:
+                    if token_count:
+                        content_hits = sum(
+                            1 for token in unique_tokens if token in normalized_text
+                        )
+                    elif normalized_query:
+                        content_hits = 1 if normalized_query in normalized_text else 0
+            else:
+                if token_count:
+                    content_hits = title_hits
+                elif normalized_query and title_exact:
+                    content_hits = 1
+
+            if title_exact or title_hits > 0 or content_hits > 0:
+                results.append((entry, title_exact, title_hits, content_hits))
+
+        results.sort(key=lambda item: (-item[1], -item[2], -item[3], item[0].title))
+        return results
 
 def main(argv: List[str]):
     if len(argv) < 2:
