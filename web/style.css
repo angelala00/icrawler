@@ -59,6 +59,8 @@ body {
   letter-spacing: 0.01em;
   box-shadow: 0 10px 30px rgba(37, 99, 235, 0.35);
   transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
 .app-header__entries-link:hover,
 .app-header__entries-link:focus-visible,
 .button-link:hover,
