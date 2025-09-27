@@ -792,32 +792,21 @@ body.entries-page {
 .entries-header {
   background: #1f2a44;
   color: #fff;
-  padding: 1.75rem 1.5rem 1.5rem;
+  padding: 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 1rem;
 }
 
 .entries-header__top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   gap: 1rem;
-  flex-wrap: wrap;
 }
 
 .entries-header__back {
-  color: #bfdbfe;
-  text-decoration: none;
-  font-weight: 600;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-}
-
-.entries-header__back:hover,
-.entries-header__back:focus {
-  text-decoration: underline;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .entries-header__meta {
