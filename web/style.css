@@ -13,16 +13,55 @@ body {
   background: #1f2a44;
   color: #fff;
   padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.app-header__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 
 .app-header h1 {
-  margin: 0 0 0.5rem 0;
+  margin: 0;
   font-size: 1.75rem;
 }
 
 .app-header p {
   margin: 0;
   opacity: 0.85;
+}
+
+.app-header__entries-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #2563eb;
+  color: #fff;
+  text-decoration: none;
+  border-radius: 999px;
+  padding: 0.6rem 1.35rem;
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+  box-shadow: 0 10px 30px rgba(37, 99, 235, 0.35);
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.app-header__entries-link:hover,
+.app-header__entries-link:focus-visible {
+  background: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.45);
+}
+
+.app-header__entries-link:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.55), 0 14px 34px rgba(37, 99, 235, 0.45);
 }
 
 main {
