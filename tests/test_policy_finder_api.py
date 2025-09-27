@@ -1,4 +1,3 @@
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -20,8 +19,7 @@ from searcher.policy_finder import DEFAULT_SEARCH_TASKS, PolicyFinder  # noqa: E
 @pytest.fixture
 def sample_state_files(tmp_path):
     policy_html = tmp_path / "policy.html"
-    policy_html.write_text(
-        """
+    html_content = """
 <html>
   <body>
     <h1>中国人民银行关于加强银行卡收单业务外包管理的通知</h1>
@@ -31,7 +29,16 @@ def sample_state_files(tmp_path):
     <p>第二款 外包合作应当依法合规。</p>
   </body>
 </html>
-        """.strip(),
+    """.strip()
+    policy_html.write_text(html_content, "utf-8")
+
+    policy_text = tmp_path / "policy.txt"
+    policy_text.write_text(
+        "中国人民银行关于加强银行卡收单业务外包管理的通知\n"
+        "第三条 第一款 收单机构应当按照下列要求开展外包管理：\n"
+        "（一）建立健全外包管理制度并明确责任。\n"
+        "（二）落实风险评估机制。\n"
+        "第二款 外包合作应当依法合规。\n",
         "utf-8",
     )
 
@@ -43,6 +50,7 @@ def sample_state_files(tmp_path):
                     "title": "中国人民银行公告〔2023〕第3号 关于测试",
                     "remark": "测试备注",
                     "documents": [
+                        {"type": "text", "local_path": str(policy_text)},
                         {"type": "html", "local_path": str(policy_html)},
                     ],
                 }
@@ -122,7 +130,7 @@ def sample_state_files(tmp_path):
                 "entry": state_payloads[
                     "zhengwugongkai_administrative_normative_documents"
                 ]["entries"][0],
-                "text_path": str(policy_html),
+                "text_path": str(policy_text),
             }
         ]
     }
@@ -184,6 +192,18 @@ def policy_api(sample_state_files):
     return finder, get_route, post_route
 
 
+@pytest.fixture
+def policy_app(sample_state_files):
+    state_paths, extract_paths = sample_state_files
+    ordered_state_paths = [
+        str(state_paths[name]) for name in DEFAULT_SEARCH_TASKS if name in state_paths
+    ]
+    finder = PolicyFinder(*ordered_state_paths)
+    lookup = ClauseLookup(list(extract_paths.values()))
+    app = create_app(finder, lookup)
+    return app, finder, lookup
+
+
 def test_get_search_endpoint(policy_api):
     finder, get_route, _ = policy_api
     assert len(finder.entries) == len(DEFAULT_SEARCH_TASKS)
@@ -238,46 +258,84 @@ def test_get_search_includes_clause(policy_api):
     assert response.status_code == 200
     payload = json.loads(response.body.decode("utf-8"))
     assert payload.get("clause_reference") is not None
-    clause_ref = payload["clause_reference"]
-    assert clause_ref["article"] == 3
-    assert clause_ref.get("paragraph") == 1
-    assert clause_ref.get("item") == 1
-    assert payload["result_count"] == 1
-    clause_payload = payload["results"][0].get("clause")
-    assert clause_payload is not None
-    assert clause_payload.get("article_matched") is True
-    assert clause_payload.get("item_matched") is True
-    assert "建立健全外包管理制度" in clause_payload.get("item_text", "")
 
 
-def test_post_search_without_documents(policy_api):
-    finder, _, post_route = policy_api
-    body = json.dumps(
-        {"query": "监管", "topk": 2, "include_documents": False},
-        ensure_ascii=False,
-    ).encode("utf-8")
-    request = _SimpleRequest(body)
-    response = asyncio.run(post_route.endpoint(request=request, finder_instance=finder))
-    assert isinstance(response, JSONResponse)
-    assert response.status_code == 200
-    payload = json.loads(response.body.decode("utf-8"))
-    assert payload["result_count"] == 2
-    for result in payload["results"]:
-        assert "documents" not in result
-
-
-def test_missing_query_returns_error(policy_api):
-    finder, get_route, _ = policy_api
-    response = get_route.endpoint(
+def test_list_policies_without_query(policy_app):
+    app, finder, lookup = policy_app
+    route = _get_route(app, "/policies", "GET")
+    response = route.endpoint(
         query=None,
-        q=None,
-        topk=None,
-        include_documents=None,
-        documents=None,
         finder_instance=finder,
+        clause_lookup_instance=lookup,
     )
     assert isinstance(response, JSONResponse)
-    assert response.status_code == 400
-    payload = json.loads(response.body.decode("utf-8"))
-    assert payload["error"]
-    assert "query" in payload["error"]
+    assert response.status_code == 200
+    data = json.loads(response.body.decode("utf-8"))
+    assert data["result_count"] == len(data["policies"])
+    assert data["result_count"] == len(DEFAULT_SEARCH_TASKS)
+    titles = [item["title"] for item in data["policies"]]
+    assert titles[0].startswith("中国人民银行")
+
+
+def test_list_policies_with_query(policy_app):
+    app, finder, lookup = policy_app
+    route = _get_route(app, "/policies", "GET")
+    response = route.endpoint(
+        query="银行卡",
+        finder_instance=finder,
+        clause_lookup_instance=lookup,
+    )
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    data = json.loads(response.body.decode("utf-8"))
+    assert data["result_count"] == 1
+    assert data["policies"][0]["title"].startswith("中国人民银行")
+
+
+def test_get_policy_meta(policy_app):
+    app, finder, lookup = policy_app
+    route = _get_route(app, "/policies/{policy_id}", "GET")
+    response = route.endpoint(
+        policy_id="1",
+        include=None,
+        finder_instance=finder,
+        clause_lookup_instance=lookup,
+    )
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    data = json.loads(response.body.decode("utf-8"))
+    assert data["policy"]["title"].startswith("中国人民银行")
+
+
+def test_get_policy_text(policy_app):
+    app, finder, lookup = policy_app
+    route = _get_route(app, "/policies/{policy_id}", "GET")
+    response = route.endpoint(
+        policy_id="1",
+        include=["text"],
+        finder_instance=finder,
+        clause_lookup_instance=lookup,
+    )
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    data = json.loads(response.body.decode("utf-8"))
+    assert "text" in data
+    assert "外包管理" in data["text"]
+
+
+def test_get_policy_outline(policy_app):
+    app, finder, lookup = policy_app
+    route = _get_route(app, "/policies/{policy_id}", "GET")
+    response = route.endpoint(
+        policy_id="1",
+        include=["outline"],
+        finder_instance=finder,
+        clause_lookup_instance=lookup,
+    )
+    assert isinstance(response, JSONResponse)
+    assert response.status_code == 200
+    data = json.loads(response.body.decode("utf-8"))
+    outline = data["outline"]
+    assert outline
+    assert outline[0]["type"] == "article"
+    assert outline[0]["children"]

@@ -43,6 +43,7 @@ from .policy_finder import (
     TIAOFASI_NORMATIVE_DOCUMENT,
     ZHENGWUGONGKAI_ADMINISTRATIVE_NORMATIVE_DOCUMENTS,
     ZHENGWUGONGKAI_CHINESE_REGULATIONS,
+    build_outline_from_text,
     canonicalize_task_name,
     default_extract_path,
     default_state_path,
@@ -287,7 +288,10 @@ def create_app(finder: PolicyFinder, clause_lookup: ClauseLookup) -> FastAPI:
 
     @app.get("/")
     def root() -> Dict[str, Any]:
-        return {"service": "policy_finder", "endpoints": ["/search"]}
+        return {
+            "service": "policy_finder",
+            "endpoints": ["/search", "/policies", "/policies/{policy_id}"],
+        }
 
     @app.get("/health")
     @app.get("/healthz")
@@ -357,6 +361,78 @@ def create_app(finder: PolicyFinder, clause_lookup: ClauseLookup) -> FastAPI:
 
         payload_data = _search_payload(finder_instance, query_text, topk_value, include_flag)
         return JSONResponse(status_code=200, content=payload_data)
+
+    def _parse_include_params(values: Optional[Sequence[str]]) -> List[str]:
+        includes: List[str] = []
+        if not values:
+            return includes
+        for value in values:
+            if value is None:
+                continue
+            for part in str(value).split(","):
+                normalized = part.strip().lower()
+                if normalized:
+                    includes.append(normalized)
+        return includes
+
+    @app.get("/policies")
+    def list_policies(
+        query: Optional[str] = Query(None),
+        finder_instance: PolicyFinder = Depends(get_finder),
+        clause_lookup_instance: ClauseLookup = Depends(get_clause_lookup),
+    ) -> JSONResponse:
+        if query:
+            matched = finder_instance.keyword_search(query, clause_lookup_instance)
+            entries = [entry for entry, _exact, _hits, _content in matched]
+        else:
+            entries = sorted(
+                finder_instance.all_entries(),
+                key=lambda e: e.norm_title or e.title,
+            )
+
+        payload: Dict[str, Any] = {
+            "policies": [entry.to_dict(include_documents=False) for entry in entries],
+            "result_count": len(entries),
+        }
+        if query:
+            payload["query"] = query
+        return JSONResponse(status_code=200, content=payload)
+
+    @app.get("/policies/{policy_id}")
+    def get_policy(
+        policy_id: str,
+        include: Optional[List[str]] = Query(None),
+        finder_instance: PolicyFinder = Depends(get_finder),
+        clause_lookup_instance: ClauseLookup = Depends(get_clause_lookup),
+    ) -> JSONResponse:
+        entry = finder_instance.find_entry(policy_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="policy_not_found")
+
+        include_params = set(_parse_include_params(include))
+        if not include_params:
+            include_params.add("meta")
+        if "all" in include_params:
+            include_params.update({"meta", "text", "outline"})
+            include_params.discard("all")
+
+        response_payload: Dict[str, Any] = {}
+        if "meta" in include_params:
+            response_payload["policy"] = entry.to_dict(include_documents=False)
+
+        text_content: Optional[str] = None
+        if include_params & {"text", "outline"}:
+            text_content = finder_instance.get_entry_text(entry, clause_lookup_instance)
+            if text_content is None:
+                raise HTTPException(status_code=404, detail="policy_text_not_available")
+
+        if "text" in include_params and text_content is not None:
+            response_payload["text"] = text_content
+
+        if "outline" in include_params and text_content is not None:
+            response_payload["outline"] = build_outline_from_text(text_content)
+
+        return JSONResponse(status_code=200, content=response_payload)
 
     def _resolve_clause_arguments(payload: Mapping[str, Any]) -> Tuple[str, str]:
         title_value = payload.get("title") or payload.get("policy")
